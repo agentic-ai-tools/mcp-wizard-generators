@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "stub-0.1",
+  "target": "aws.bedrock.agentcore",
+  "mcpServer": {
+    "package": "pets_tiny_mcp",
+    "entrypoint": "pets_tiny_mcp.server:main",
+    "transport": "stdio"
+  },
+  "tools": [
+    "listpets",
+    "showpetbyid"
+  ],
+  "notes": "Placeholder \u2014 replace with real AgentCore config shape when pinned."
+}

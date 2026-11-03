@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-wizard-generators"
+version = "0.1.0"
+description = "Pluggable OpenAPI → MCP generators for MCP Wizard (AgentCore first)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "agentic-ai-tools" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+mcp-wizard-gen = "mcp_wizard_generators.cli:main"
+
+# hatchling discovers src/mcp_wizard_generators from the project name.
+
+[tool.hatch.build.targets.sdist]
+include = ["src/mcp_wizard_generators", "tests", "README.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
