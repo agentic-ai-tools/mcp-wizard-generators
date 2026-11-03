@@ -1,0 +1,24 @@
+{
+  "target": "agentcore",
+  "language": "python",
+  "title": "Pets Tiny API",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "listpets",
+      "operationId": "listPets",
+      "method": "get",
+      "path": "/pets"
+    },
+    {
+      "name": "showpetbyid",
+      "operationId": "showPetById",
+      "method": "get",
+      "path": "/pets/{petId}"
+    }
+  ],
+  "security": {
+    "authMode": "none",
+    "secretsStrategy": "dotenv_example_only"
+  }
+}

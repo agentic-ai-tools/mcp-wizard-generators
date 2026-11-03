@@ -1,0 +1,57 @@
+{
+  "title": "Pets Tiny API",
+  "version": "1.0.0",
+  "specVersion": "3.0",
+  "servers": ["https://petstore.example.com/v1"],
+  "operations": [
+    {
+      "id": "listPets",
+      "operationId": "listPets",
+      "method": "get",
+      "path": "/pets",
+      "summary": "List all pets",
+      "tags": ["pets"],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of pets to return",
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "id": "createPets",
+      "operationId": "createPets",
+      "method": "post",
+      "path": "/pets",
+      "summary": "Create a pet",
+      "tags": ["pets"],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "tag": { "type": "string" }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "id": "showPetById",
+      "operationId": "showPetById",
+      "method": "get",
+      "path": "/pets/{petId}",
+      "summary": "Info for a specific pet",
+      "tags": ["pets"],
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "petId": { "type": "string" }
+        },
+        "required": ["petId"]
+      }
+    }
+  ]
+}
