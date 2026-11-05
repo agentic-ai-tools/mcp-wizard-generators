@@ -10,6 +10,7 @@ from pathlib import Path
 from mcp_wizard_generators.models import AgentRulesBundle, IntermediateRep, SecurityConfig
 from mcp_wizard_generators.packaging import pack_file_tree_to_zip
 from mcp_wizard_generators.pipeline import generate
+from mcp_wizard_generators.python_mcp import generate_python_mcp
 from mcp_wizard_generators.registry import get_default_registry
 
 
@@ -29,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     gen = sub.add_parser("generate", help="IR JSON → file tree and/or zip")
     gen.add_argument("--ir", required=True, type=Path, help="Path to IntermediateRep JSON")
-    gen.add_argument("--target", default="agentcore")
+    gen.add_argument("--target", default="local", help="Generator target (default: local)")
     gen.add_argument("--language", default="python")
     gen.add_argument(
         "--select",
@@ -43,8 +44,38 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--manifest", type=Path, help="Write generation manifest JSON")
     gen.add_argument("--auth-mode", default="none")
     gen.add_argument("--rules-dir", type=Path, help="Optional directory of Agent Rules originals")
-    gen.add_argument("--rules-family", default="unknown", choices=["cursor", "anthropic", "mixed", "unknown"])
+    gen.add_argument(
+        "--rules-family",
+        default="unknown",
+        choices=["cursor", "anthropic", "mixed", "unknown"],
+    )
     gen.set_defaults(func=cmd_generate)
+
+    py = sub.add_parser(
+        "generate-python",
+        help="Convenience: local Python MCP (FastMCP/MCPServer) → out-dir and/or zip",
+    )
+    py.add_argument(
+        "--ir",
+        type=Path,
+        help="Path to IntermediateRep JSON (or simple {title,servers,operations} JSON)",
+    )
+    py.add_argument(
+        "--operations",
+        type=Path,
+        help="Optional JSON file: list of operation ids or operation objects",
+    )
+    py.add_argument(
+        "--select",
+        action="append",
+        default=None,
+        help="Operation id to include (repeatable; alternative to --operations)",
+    )
+    py.add_argument("--package-name", default="generated_mcp")
+    py.add_argument("--out-dir", type=Path, help="Write file tree to this directory")
+    py.add_argument("--zip", type=Path, help="Write zip archive to this path")
+    py.add_argument("--auth-mode", default="none")
+    py.set_defaults(func=cmd_generate_python)
     return p
 
 
@@ -75,15 +106,45 @@ def cmd_generate(args: argparse.Namespace) -> int:
         security=SecurityConfig(auth_mode=args.auth_mode),
         agent_rules=_load_rules(args),
         package_name=args.package_name,
+        fail_on_rules_errors=False if args.target == "local" else True,
     )
     if args.out_dir:
         result.tree.write_to(args.out_dir)
     if args.zip:
         pack_file_tree_to_zip(result.tree, args.zip)
     if args.manifest:
+        args.manifest.parent.mkdir(parents=True, exist_ok=True)
         args.manifest.write_text(json.dumps(result.manifest, indent=2) + "\n", encoding="utf-8")
     if not args.out_dir and not args.zip and not args.manifest:
         print(json.dumps(result.manifest, indent=2))
+    return 0
+
+
+def cmd_generate_python(args: argparse.Namespace) -> int:
+    if not args.ir and not args.operations:
+        raise SystemExit("generate-python requires --ir and/or --operations")
+    if not args.out_dir and not args.zip:
+        raise SystemExit("generate-python requires --out-dir and/or --zip")
+
+    spec = _load_json(args.ir) if args.ir else {}
+    operations: list | None = args.select
+    if args.operations:
+        loaded = json.loads(Path(args.operations).read_text(encoding="utf-8"))
+        if isinstance(loaded, dict) and "operations" in loaded and not args.ir:
+            spec = loaded
+            operations = args.select
+        else:
+            operations = loaded
+
+    path = generate_python_mcp(
+        spec,
+        operations,
+        out_dir=args.out_dir,
+        zip_path=args.zip,
+        package_name=args.package_name,
+        auth_mode=args.auth_mode,
+    )
+    print(str(path))
     return 0
 
 

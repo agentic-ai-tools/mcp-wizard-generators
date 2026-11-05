@@ -5,62 +5,108 @@ Pluggable **OpenAPI IR → MCP project** generators for [MCP Wizard](https://git
 This package is a **library + CLI**. It does **not** run HTTP servers or workers.  
 `mcp-wizard-api` owns jobs, entitlements, zip/GitHub delivery, and invokes this package offline.
 
-**MVP primary plugin:** `agentcore` + `python` (AWS Bedrock AgentCore) — ADR-001 / ADR-005.
+**Near-term slice:** `local` + `python` — runnable Anthropic-style MCP server zip + Cursor config.  
+**Also registered:** `agentcore` + `python` scaffold (AgentCore deploy stubs; expand later).
+
+## SDK choice (generated Python MCP)
+
+Generated servers use the **official MCP Python SDK** (`mcp` on PyPI):
+
+| SDK line | High-level class | Import |
+|----------|------------------|--------|
+| 1.x | **FastMCP** | `from mcp.server.fastmcp import FastMCP` |
+| 2.x (current) | **MCPServer** (FastMCP renamed) | `from mcp.server import MCPServer` |
+
+Templates emit a small import shim and pin `mcp>=1.6,<3` so either line works. Transport is **stdio** for Cursor local MCP. Upstream HTTP calls use **httpx** against `API_BASE_URL`.
 
 ## Layout
 
 ```
 src/mcp_wizard_generators/
-  models.py          # IntermediateRep, ToolMap, FileTree, GenerateContext
-  toolmap.py         # IR ops → MCP tool names / JSON Schema inputs
-  pipeline.py        # generate(): IR → tool map → rules hooks → plugin → tree
-  registry.py        # Plugin registry keyed by (target, language)
-  cli.py             # mcp-wizard-gen / python -m mcp_wizard_generators
-  rules/             # Cursor + Anthropic enforcement stubs (ADR-007)
-  packaging/         # zip helper for Artifact Service
-  plugins/agentcore/ # AWS Bedrock AgentCore + Python emitter
+  models.py              # IntermediateRep, ToolMap, FileTree, GenerateContext
+  toolmap.py             # IR ops → MCP tool names / JSON Schema inputs
+  pipeline.py            # generate(): IR → tool map → rules hooks → plugin → tree
+  python_mcp.py          # generate_python_mcp() — stable API for mcp-wizard-api
+  registry.py            # Plugin registry keyed by (target, language)
+  cli.py                 # mcp-wizard-gen / python -m mcp_wizard_generators
+  packaging/             # zip helper for Artifact Service
+  plugins/python_mcp/   # Local Python MCP (stdio) emitter
+  plugins/agentcore/     # AWS Bedrock AgentCore scaffold (deploy stubs)
+  rules/                 # Cursor + Anthropic hooks (not enforced in local slice)
 tests/
-  fixtures/          # tiny pets OpenAPI + IR
-  goldens/           # expected AgentCore file tree
+  fixtures/              # tiny pets OpenAPI + IR
+  goldens/               # expected file trees
 ```
-
-## Pipeline
-
-1. **IR normalize** (caller / Import Service) → `IntermediateRep` JSON  
-2. **Tool mapping** → `ToolMap`  
-3. **Agent Rules hooks** (Cursor + Anthropic stubs)  
-4. **Plugin generate** → `FileTree`  
-5. **Package** → zip bytes (optional) or write to disk  
 
 ## How `mcp-wizard-api` should invoke this
 
-### Library (preferred in workers)
+### Library (preferred in workers) — Python MCP zip
+
+```python
+from pathlib import Path
+from mcp_wizard_generators import generate_python_mcp
+
+# Prefer this stable contract for the near-term generate slice:
+out = generate_python_mcp(
+    spec,                          # IntermediateRep | IR dict | {title, servers, ...}
+    operations=["listPets", "showPetById"],  # ids — or list of simple op dicts
+    out_dir=Path("/tmp/workdir/pets-mcp"),
+    zip_path=Path("/tmp/artifacts/pets-mcp.zip"),  # optional
+    package_name="pets_tiny_mcp",
+    auth_mode="none",              # none | api_key | oauth2
+)
+# out → Path(out_dir) if out_dir set, else Path(zip_path)
+```
+
+**Simple operations JSON** (no full IR) is also accepted:
+
+```python
+generate_python_mcp(
+    {"title": "Pets", "servers": ["https://petstore.example.com/v1"]},
+    operations=[
+        {
+            "operationId": "listPets",
+            "method": "get",
+            "path": "/pets",
+            "summary": "List all pets",
+            "params": [{"name": "limit", "type": "integer"}],
+        }
+    ],
+    out_dir="/tmp/out",
+)
+```
+
+In-memory result (manifest / tool map / tree) without writing:
+
+```python
+from mcp_wizard_generators import generate_python_mcp_result
+
+result = generate_python_mcp_result(spec, operations=["listPets"])
+zip_bytes = pack_file_tree_to_zip(result.tree)  # from mcp_wizard_generators.packaging
+```
+
+### Generic plugin pipeline
 
 ```python
 from mcp_wizard_generators import generate, IntermediateRep
 from mcp_wizard_generators.packaging import pack_file_tree_to_zip
 
-# snapshot comes from GenerationJob.snapshot (IR subset + selections)
 ir = IntermediateRep.from_dict(job_snapshot["ir"])
 result = generate(
     ir,
-    target=job_snapshot.get("targetArchitecture", "agentcore"),
+    target=job_snapshot.get("targetArchitecture", "local"),
     language=job_snapshot.get("language", "python"),
     selected_operation_ids=job_snapshot["selectedOperationIds"],
     tool_name_overrides=job_snapshot.get("toolNameOverrides"),
     package_name="generated_mcp",
 )
-
-# Experience API Artifact Service stores the zip (MinIO/S3) or writes to GitHub.
 zip_bytes = pack_file_tree_to_zip(result.tree)
-# result.manifest → Artifact.manifest
-# result.tree.write_to(workdir)  # optional before git commit
 ```
 
 Pin a released version of this package from the API deployable / Lambda layer.  
 Do **not** vendor template trees inside `mcp-wizard-api` PRs (ADR-005).
 
-### CLI (local / scripts / one-shot jobs)
+### CLI
 
 ```bash
 pip install -e ".[dev]"
@@ -68,10 +114,19 @@ pip install -e ".[dev]"
 # List plugins
 python -m mcp_wizard_generators list-targets
 
-# Generate tree + zip from an IR fixture
+# Near-term: local Python MCP → tree + zip
+python -m mcp_wizard_generators generate-python \
+  --ir tests/fixtures/pets_tiny.ir.json \
+  --select listPets \
+  --select showPetById \
+  --package-name pets_tiny_mcp \
+  --out-dir /tmp/out \
+  --zip /tmp/out.zip
+
+# Equivalent via generic generate (default target=local)
 python -m mcp_wizard_generators generate \
   --ir tests/fixtures/pets_tiny.ir.json \
-  --target agentcore \
+  --target local \
   --language python \
   --select listPets \
   --select showPetById \
@@ -82,15 +137,20 @@ python -m mcp_wizard_generators generate \
 
 Console script (after install): `mcp-wizard-gen …`
 
-## Agent Rules stubs
+## Generated artifact (local Python MCP)
 
-`rules/cursor.py` and `rules/anthropic.py` are **hooks only** in this scaffold:
+| Path | Purpose |
+|------|---------|
+| `pyproject.toml` / `requirements.txt` | `mcp` + `httpx` deps |
+| `README.md` | SDK choice, run + Cursor setup |
+| `.env.example` | `API_BASE_URL` (+ auth placeholders) |
+| `.cursor/mcp.json` | Cursor MCP snippet (`command`/`args`/`env`) |
+| `src/<pkg>/server.py` | FastMCP/MCPServer tools (1:1 with ops) |
+| `src/<pkg>/client.py` | httpx → upstream API |
+| `src/<pkg>/__main__.py` | `python -m <pkg>` stdio entry |
+| `generation-manifest.json` | tools + generator metadata |
 
-- Detect Cursor (`.mdc`, `.cursorrules`, `AGENTS.md`) vs Anthropic (`CLAUDE.md`, `.claude/`) originals  
-- Emit warn-level reports when `formatFamily` does not match files  
-- Real naming/path enforcement lands in follow-up work  
-
-Wire session rules into `AgentRulesBundle` before calling `generate()`.
+**Out of scope in this slice:** AgentCore cloud deploy scaffolding, Agent Rules enforcement/embedding, non-Python languages, GitHub repo write delivery.
 
 ## Tests
 
@@ -99,8 +159,9 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Golden coverage: `tests/fixtures/pets_tiny.ir.json` (tiny OpenAPI subset) →  
-`tests/goldens/agentcore_pets_tiny/` for `listPets` + `showPetById`.
+Golden coverage: `tests/fixtures/pets_tiny.ir.json` →  
+`tests/goldens/python_mcp_pets_tiny/` (+ zip member assertions) for `listPets` + `showPetById`.  
+AgentCore scaffold golden remains under `tests/goldens/agentcore_pets_tiny/`.
 
 ## Non-goals (this repo)
 

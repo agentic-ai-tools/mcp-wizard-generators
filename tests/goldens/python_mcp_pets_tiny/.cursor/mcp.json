@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "pets_tiny_mcp": {
+      "command": "python",
+      "args": [
+        "-m",
+        "pets_tiny_mcp"
+      ],
+      "env": {
+        "API_BASE_URL": "https://petstore.example.com/v1"
+      }
+    }
+  }
+}
