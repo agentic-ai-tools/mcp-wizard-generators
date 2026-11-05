@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -105,9 +106,7 @@ class FileTree:
                 return entry
         return None
 
-    def write_to(self, dest_dir: str) -> None:
-        from pathlib import Path
-
+    def write_to(self, dest_dir: str | Path) -> Path:
         root = Path(dest_dir)
         root.mkdir(parents=True, exist_ok=True)
         for entry in self.entries:
@@ -116,6 +115,7 @@ class FileTree:
             target.write_text(entry.content, encoding="utf-8")
             if entry.executable:
                 target.chmod(target.stat().st_mode | 0o111)
+        return root
 
 
 @dataclass

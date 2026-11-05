@@ -51,12 +51,14 @@ _default: GeneratorRegistry | None = None
 
 
 def get_default_registry() -> GeneratorRegistry:
-    """Lazy-built registry with MVP plugins (AgentCore + Python first)."""
+    """Lazy-built registry with MVP plugins (local Python MCP + AgentCore scaffold)."""
     global _default
     if _default is None:
         from mcp_wizard_generators.plugins.agentcore import AgentCorePythonPlugin
+        from mcp_wizard_generators.plugins.python_mcp import PythonMcpPlugin
 
         registry = GeneratorRegistry()
+        registry.register(PythonMcpPlugin())
         registry.register(AgentCorePythonPlugin())
         _default = registry
     return _default

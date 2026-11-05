@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pets-tiny-mcp"
+version = "0.1.0"
+description = "Generated MCP server for Pets Tiny API"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp>=1.6.0,<3",
+  "httpx>=0.27",
+]
+
+[project.scripts]
+pets-tiny-mcp = "pets_tiny_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pets_tiny_mcp"]

@@ -9,6 +9,7 @@ from mcp_wizard_generators.models import (
     ToolMapping,
 )
 from mcp_wizard_generators.pipeline import generate
+from mcp_wizard_generators.python_mcp import generate_python_mcp, generate_python_mcp_result
 from mcp_wizard_generators.registry import GeneratorRegistry, get_default_registry
 
 __all__ = [
@@ -20,7 +21,9 @@ __all__ = [
     "ToolMap",
     "ToolMapping",
     "generate",
+    "generate_python_mcp",
+    "generate_python_mcp_result",
     "get_default_registry",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
