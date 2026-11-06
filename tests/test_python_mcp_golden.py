@@ -61,7 +61,7 @@ def test_python_mcp_pets_tiny_golden() -> None:
     assert [t.tool_name for t in result.tool_map.tools] == ["listpets", "showpetbyid"]
     server = result.tree.get("src/pets_tiny_mcp/server.py")
     assert server is not None
-    assert "MCPServer" in server.content or "FastMCP" in server.content
+    assert "from mcp.server.mcpserver import MCPServer" in server.content
     assert '@mcp.tool(name="listpets"' in server.content
     assert '@mcp.tool(name="showpetbyid"' in server.content
     assert "path_template.format(petId=petId)" in server.content

@@ -1,6 +1,7 @@
-"""MCP stdio server — official Python SDK high-level API.
+"""MCP stdio server — official Python SDK MCPServer (mcp 2.x).
 
-Prefer MCPServer (mcp 2.x); fall back to FastMCP (mcp 1.x).
+Primary import follows the mcp 2 migration guide:
+https://py.sdk.modelcontextprotocol.io/v2/migration/#fastmcp-renamed-to-mcpserver
 """
 
 from __future__ import annotations
@@ -10,8 +11,8 @@ from typing import Any
 from pets_tiny_mcp.client import request
 
 try:
-    from mcp.server import MCPServer as _MCP
-except ImportError:  # mcp 1.x
+    from mcp.server.mcpserver import MCPServer as _MCP
+except ImportError:  # mcp 1.x only — fresh installs pin mcp>=2
     from mcp.server.fastmcp import FastMCP as _MCP
 
 mcp = _MCP("Pets Tiny API")

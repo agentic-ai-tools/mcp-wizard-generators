@@ -1,7 +1,8 @@
 """Emit a locally runnable Python MCP server from selected OpenAPI operations.
 
-Uses the official MCP Python SDK high-level server API (FastMCP in mcp 1.x;
-MCPServer in mcp 2.x). Generated code includes a compatibility import shim.
+Uses the official MCP Python SDK high-level server API: MCPServer on mcp 2.x
+(`from mcp.server.mcpserver import MCPServer`). Generated code may include a
+small FastMCP fallback for mcp 1.x, but fresh zips pin mcp>=2,<3.
 """
 
 from __future__ import annotations
@@ -55,7 +56,7 @@ class PythonMcpPlugin:
         return {
             "target": self.key,
             "language": self.language,
-            "sdk": "mcp (official Python SDK; FastMCP / MCPServer high-level API)",
+            "sdk": "mcp (official Python SDK; MCPServer high-level API, mcp>=2,<3)",
             "title": ctx.ir.title,
             "version": ctx.ir.version,
             "tools": [
@@ -92,11 +93,11 @@ class PythonMcpPlugin:
                 "",
                 "## SDK choice",
                 "",
-                "This project uses the **official MCP Python SDK** (`mcp` on PyPI) high-level",
-                "server API — historically **FastMCP** (`mcp.server.fastmcp.FastMCP` on 1.x),",
-                "renamed to **MCPServer** (`mcp.server.MCPServer` on 2.x). The entrypoint",
-                "includes a small import shim so either line works. Tools speak **stdio**,",
-                "which Cursor expects for local MCP servers.",
+                "This project uses the **official MCP Python SDK** (`mcp` on PyPI) **2.x**",
+                "high-level **MCPServer** API (`from mcp.server.mcpserver import MCPServer`).",
+                "Dependencies pin `mcp>=2.0.0,<3`. (On mcp 1.x the same class was named",
+                "**FastMCP** under `mcp.server.fastmcp`.) Tools speak **stdio**, which Cursor",
+                "expects for local MCP servers.",
                 "",
                 "## Tools (1:1 with selected OpenAPI operations)",
                 "",
@@ -104,17 +105,28 @@ class PythonMcpPlugin:
                 "",
                 "## Run locally",
                 "",
-                "**macOS / Linux / WSL / Git Bash:**",
+                "Create a venv, activate it (see matrix below), then install and run:",
                 "",
                 "```bash",
-                "python3 -m venv .venv && source .venv/bin/activate",
+                "python3 -m venv .venv",
+                "# activate — use the row that matches your OS / shell (table below)",
                 "pip install -r requirements.txt",
                 "# or: pip install -e .",
                 "cp .env.example .env   # set API_BASE_URL (and auth if needed)",
                 f"python -m {pkg}",
                 "```",
                 "",
-                "**Windows PowerShell:**",
+                "### Virtualenv activate paths",
+                "",
+                "| Environment | Activate |",
+                "| --- | --- |",
+                "| macOS / Linux / WSL / Git Bash on Linux | `source .venv/bin/activate` |",
+                "| Windows cmd | `.venv\\Scripts\\activate.bat` |",
+                "| Windows PowerShell | `.\\.venv\\Scripts\\Activate.ps1` |",
+                "| Git Bash on Windows | `source .venv/Scripts/activate` (typical for a Windows-created venv). "
+                "If your venv uses a Unix layout instead, use `source .venv/bin/activate`. |",
+                "",
+                "**Windows PowerShell (full example):**",
                 "",
                 "```powershell",
                 "py -3 -m venv .venv; .\\.venv\\Scripts\\Activate.ps1",
@@ -165,7 +177,7 @@ class PythonMcpPlugin:
             description = "Generated MCP server for {ctx.ir.title}"
             requires-python = ">=3.11"
             dependencies = [
-              "mcp>=1.6.0,<3",
+              "mcp>=2.0.0,<3",
               "httpx>=0.27",
             ]
 
@@ -178,7 +190,7 @@ class PythonMcpPlugin:
         )
 
     def _requirements(self) -> str:
-        return "mcp>=1.6.0,<3\nhttpx>=0.27\n"
+        return "mcp>=2.0.0,<3\nhttpx>=0.27\n"
 
     def _env_example(self, ctx: GenerateContext) -> str:
         base = ctx.ir.servers[0] if ctx.ir.servers else "https://api.example.com"
@@ -226,7 +238,7 @@ class PythonMcpPlugin:
     def _init(self, ctx: GenerateContext) -> str:
         return (
             f'"""Generated MCP server for {ctx.ir.title}.\n\n'
-            "Built with the official MCP Python SDK (FastMCP / MCPServer).\n"
+            "Built with the official MCP Python SDK (MCPServer, mcp>=2).\n"
             '"""\n\n__version__ = "0.1.0"\n'
         )
 
@@ -324,9 +336,10 @@ class PythonMcpPlugin:
         return (
             dedent(
                 f'''\
-                """MCP stdio server — official Python SDK high-level API.
+                """MCP stdio server — official Python SDK MCPServer (mcp 2.x).
 
-                Prefer MCPServer (mcp 2.x); fall back to FastMCP (mcp 1.x).
+                Primary import follows the mcp 2 migration guide:
+                https://py.sdk.modelcontextprotocol.io/v2/migration/#fastmcp-renamed-to-mcpserver
                 """
 
                 from __future__ import annotations
@@ -336,8 +349,8 @@ class PythonMcpPlugin:
                 from {pkg}.client import request
 
                 try:
-                    from mcp.server import MCPServer as _MCP
-                except ImportError:  # mcp 1.x
+                    from mcp.server.mcpserver import MCPServer as _MCP
+                except ImportError:  # mcp 1.x only — fresh installs pin mcp>=2
                     from mcp.server.fastmcp import FastMCP as _MCP
 
                 mcp = _MCP({title_literal})
