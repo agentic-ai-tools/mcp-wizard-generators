@@ -13,16 +13,34 @@ authors = [{ name = "agentic-ai-tools" }]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = [
+  "pytest>=8.0",
+  "tox>=4.0",
+  "ruff>=0.6",
+]
 
 [project.scripts]
 mcp-wizard-gen = "mcp_wizard_generators.cli:main"
 
-# hatchling discovers src/mcp_wizard_generators from the project name.
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_wizard_generators"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/mcp_wizard_generators", "tests", "README.md", "pyproject.toml"]
+include = ["src/mcp_wizard_generators", "tests", "README.md", "pyproject.toml", "scripts", "Makefile", "tox.ini", "docs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+extend-exclude = ["tests/goldens"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"

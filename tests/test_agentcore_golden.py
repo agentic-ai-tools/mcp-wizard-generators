@@ -41,8 +41,8 @@ def test_agentcore_pets_tiny_golden() -> None:
     for entry in result.tree.entries:
         golden_file = GOLDEN_DIR / entry.path
         assert golden_file.is_file(), f"missing golden: {entry.path}"
-        assert _normalize(entry.content) == _normalize(
-            golden_file.read_text(encoding="utf-8")
-        ), f"content drift: {entry.path}"
+        assert _normalize(entry.content) == _normalize(golden_file.read_text(encoding="utf-8")), (
+            f"content drift: {entry.path}"
+        )
 
     assert [t.tool_name for t in result.tool_map.tools] == ["listpets", "showpetbyid"]

@@ -47,13 +47,14 @@ from pathlib import Path
 from mcp_wizard_generators import generate_python_mcp
 
 # Prefer this stable contract for the near-term generate slice:
+workdir = Path("workdir")  # or tempfile.mkdtemp() — avoid hard-coded /tmp on Windows
 out = generate_python_mcp(
-    spec,                          # IntermediateRep | IR dict | {title, servers, ...}
+    spec,  # IntermediateRep | IR dict | {title, servers, ...}
     operations=["listPets", "showPetById"],  # ids — or list of simple op dicts
-    out_dir=Path("/tmp/workdir/pets-mcp"),
-    zip_path=Path("/tmp/artifacts/pets-mcp.zip"),  # optional
+    out_dir=workdir / "pets-mcp",
+    zip_path=workdir / "pets-mcp.zip",  # optional
     package_name="pets_tiny_mcp",
-    auth_mode="none",              # none | api_key | oauth2
+    auth_mode="none",  # none | api_key | oauth2
 )
 # out → Path(out_dir) if out_dir set, else Path(zip_path)
 ```
@@ -72,7 +73,7 @@ generate_python_mcp(
             "params": [{"name": "limit", "type": "integer"}],
         }
     ],
-    out_dir="/tmp/out",
+    out_dir="out",
 )
 ```
 
@@ -108,20 +109,20 @@ Do **not** vendor template trees inside `mcp-wizard-api` PRs (ADR-005).
 
 ### CLI
 
-```bash
-pip install -e ".[dev]"
+Prefer relative output paths (portable on macOS **and** Windows). Full shell matrix: [`docs/local-dev.md`](docs/local-dev.md).
 
-# List plugins
+```bash
+# macOS / Linux / WSL / Git Bash
+make bootstrap          # or: sh scripts/bootstrap.sh
 python -m mcp_wizard_generators list-targets
 
-# Near-term: local Python MCP → tree + zip
 python -m mcp_wizard_generators generate-python \
   --ir tests/fixtures/pets_tiny.ir.json \
   --select listPets \
   --select showPetById \
   --package-name pets_tiny_mcp \
-  --out-dir /tmp/out \
-  --zip /tmp/out.zip
+  --out-dir .smoke-out \
+  --zip .smoke-out.zip
 
 # Equivalent via generic generate (default target=local)
 python -m mcp_wizard_generators generate \
@@ -130,12 +131,24 @@ python -m mcp_wizard_generators generate \
   --language python \
   --select listPets \
   --select showPetById \
-  --out-dir /tmp/out \
-  --zip /tmp/out.zip \
-  --manifest /tmp/manifest.json
+  --out-dir .smoke-out \
+  --zip .smoke-out.zip \
+  --manifest .smoke-out/manifest.json
 ```
 
-Console script (after install): `mcp-wizard-gen …`
+```powershell
+# Windows PowerShell
+.\scripts\bootstrap.ps1
+python -m mcp_wizard_generators generate-python `
+  --ir tests/fixtures/pets_tiny.ir.json `
+  --select listPets `
+  --select showPetById `
+  --package-name pets_tiny_mcp `
+  --out-dir .smoke-out `
+  --zip .smoke-out.zip
+```
+
+Console script (after install): `mcp-wizard-gen …` (Windows: `.venv\Scripts\mcp-wizard-gen.exe`).
 
 ## Generated artifact (local Python MCP)
 
@@ -152,12 +165,17 @@ Console script (after install): `mcp-wizard-gen …`
 
 **Out of scope in this slice:** AgentCore cloud deploy scaffolding, Agent Rules enforcement/embedding, non-Python languages, GitHub repo write delivery.
 
-## Tests
+## Tests & local scripts
 
 ```bash
-pip install -e ".[dev]"
-pytest
+make bootstrap && make test    # or: sh scripts/test.sh
+make lint                      # ruff (required before commit per AGENTS.md)
+make cli-smoke                 # portable generate smoke
+make tox                       # optional isolated envs
 ```
+
+Windows PowerShell twins: `.\scripts\bootstrap.ps1`, `.\scripts\test.ps1`, `.\scripts\cli-smoke.ps1`.  
+Details and the **macOS / WSL / Git Bash / PowerShell** matrix: [`docs/local-dev.md`](docs/local-dev.md).
 
 Golden coverage: `tests/fixtures/pets_tiny.ir.json` →  
 `tests/goldens/python_mcp_pets_tiny/` (+ zip member assertions) for `listPets` + `showPetById`.  

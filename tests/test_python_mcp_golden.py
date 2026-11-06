@@ -54,9 +54,9 @@ def test_python_mcp_pets_tiny_golden() -> None:
     for entry in result.tree.entries:
         golden_file = GOLDEN_DIR / entry.path
         assert golden_file.is_file(), f"missing golden: {entry.path}"
-        assert _normalize(entry.content) == _normalize(
-            golden_file.read_text(encoding="utf-8")
-        ), f"content drift: {entry.path}"
+        assert _normalize(entry.content) == _normalize(golden_file.read_text(encoding="utf-8")), (
+            f"content drift: {entry.path}"
+        )
 
     assert [t.tool_name for t in result.tool_map.tools] == ["listpets", "showpetbyid"]
     server = result.tree.get("src/pets_tiny_mcp/server.py")
@@ -64,7 +64,7 @@ def test_python_mcp_pets_tiny_golden() -> None:
     assert "MCPServer" in server.content or "FastMCP" in server.content
     assert '@mcp.tool(name="listpets"' in server.content
     assert '@mcp.tool(name="showpetbyid"' in server.content
-    assert 'path_template.format(petId=petId)' in server.content
+    assert "path_template.format(petId=petId)" in server.content
 
     cursor = result.tree.get(".cursor/mcp.json")
     assert cursor is not None

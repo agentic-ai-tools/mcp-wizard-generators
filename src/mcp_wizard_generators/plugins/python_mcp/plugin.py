@@ -12,7 +12,6 @@ from textwrap import dedent, indent
 
 from mcp_wizard_generators.models import FileEntry, FileTree, GenerateContext, ToolMapping
 
-
 _JSON_TYPE_TO_PY = {
     "string": "str",
     "integer": "int",
@@ -76,10 +75,13 @@ class PythonMcpPlugin:
 
     def _readme(self, ctx: GenerateContext) -> str:
         pkg = ctx.package_name
-        tool_lines = "\n".join(
-            f"- `{t.tool_name}` ← `{t.method.upper()} {t.path}` — {t.description}"
-            for t in ctx.tool_map.tools
-        ) or "(none)"
+        tool_lines = (
+            "\n".join(
+                f"- `{t.tool_name}` ← `{t.method.upper()} {t.path}` — {t.description}"
+                for t in ctx.tool_map.tools
+            )
+            or "(none)"
+        )
         base = ctx.ir.servers[0] if ctx.ir.servers else "https://api.example.com"
         # Build with explicit newlines (avoid textwrap.dedent + f-string indent drift).
         return "\n".join(
@@ -102,11 +104,22 @@ class PythonMcpPlugin:
                 "",
                 "## Run locally",
                 "",
+                "**macOS / Linux / WSL / Git Bash:**",
+                "",
                 "```bash",
-                "python -m venv .venv && source .venv/bin/activate",
+                "python3 -m venv .venv && source .venv/bin/activate",
                 "pip install -r requirements.txt",
                 "# or: pip install -e .",
                 "cp .env.example .env   # set API_BASE_URL (and auth if needed)",
+                f"python -m {pkg}",
+                "```",
+                "",
+                "**Windows PowerShell:**",
+                "",
+                "```powershell",
+                "py -3 -m venv .venv; .\\.venv\\Scripts\\Activate.ps1",
+                "pip install -r requirements.txt",
+                "Copy-Item .env.example .env",
                 f"python -m {pkg}",
                 "```",
                 "",
@@ -118,7 +131,8 @@ class PythonMcpPlugin:
                 "1. Copy `.cursor/mcp.json` into your project's `.cursor/mcp.json`, **or**",
                 "2. Open **Cursor Settings → MCP** and merge the `mcpServers` entry.",
                 "",
-                "Point `command`/`args` at the venv Python that has this package installed,",
+                "Point `command`/`args` at the venv Python that has this package installed",
+                "(on Windows prefer the full path to `.venv\\Scripts\\python.exe`),",
                 "or use an absolute path. Set `API_BASE_URL` (and secrets) under `env`.",
                 "",
                 "## Layout",
@@ -382,15 +396,15 @@ class PythonMcpPlugin:
 
         if leftover:
             dict_items = ", ".join(f'"{n}": {n}' for n in leftover)
-            body_lines.append(f"    payload = {{k: v for k, v in {{{dict_items}}}.items() if v is not None}}")
+            body_lines.append(
+                f"    payload = {{k: v for k, v in {{{dict_items}}}.items() if v is not None}}"
+            )
             if uses_body:
                 body_lines.append(
                     f'    return request("{method}", path, json_body=payload or None)'
                 )
             else:
-                body_lines.append(
-                    f'    return request("{method}", path, params=payload or None)'
-                )
+                body_lines.append(f'    return request("{method}", path, params=payload or None)')
         else:
             body_lines.append(f'    return request("{method}", path)')
 

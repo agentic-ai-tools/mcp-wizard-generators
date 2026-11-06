@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
+
+from mcp_wizard_generators.paths import normalize_tree_path
 
 
 @dataclass(frozen=True)
@@ -110,11 +113,17 @@ class FileTree:
         root = Path(dest_dir)
         root.mkdir(parents=True, exist_ok=True)
         for entry in self.entries:
-            target = root / entry.path
+            rel = normalize_tree_path(entry.path)
+            # Join POSIX segments so Windows hosts never treat "a/b" as one name.
+            target = root.joinpath(*PurePosixPath(rel).parts) if rel else root
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(entry.content, encoding="utf-8")
-            if entry.executable:
-                target.chmod(target.stat().st_mode | 0o111)
+            if entry.executable and os.name != "nt":
+                try:
+                    target.chmod(target.stat().st_mode | 0o111)
+                except OSError:
+                    # Some filesystems (and sandboxes) reject mode bits; content is enough.
+                    pass
         return root
 
 

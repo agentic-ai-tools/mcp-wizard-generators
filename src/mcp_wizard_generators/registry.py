@@ -31,8 +31,7 @@ class GeneratorRegistry:
         if key not in self._plugins:
             available = ", ".join(f"{t}/{lang}" for t, lang in sorted(self._plugins)) or "(none)"
             raise KeyError(
-                f"No generator for target={target!r} language={language!r}. "
-                f"Registered: {available}"
+                f"No generator for target={target!r} language={language!r}. Registered: {available}"
             )
         return self._plugins[key]
 

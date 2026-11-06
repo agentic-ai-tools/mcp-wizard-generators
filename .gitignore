@@ -7,7 +7,10 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
 .venv/
 venv/
 *.zip
+.smoke-out/
+.smoke-out.zip
 .DS_Store

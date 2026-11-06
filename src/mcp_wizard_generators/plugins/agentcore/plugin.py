@@ -27,12 +27,17 @@ class AgentCorePythonPlugin:
             FileEntry("README.md", self._readme(ctx)),
             FileEntry("pyproject.toml", self._pyproject(pkg, ctx)),
             FileEntry(".env.example", self._env_example(ctx)),
-            FileEntry(f"src/{pkg}/__init__.py", f'"""Generated MCP server for {ctx.ir.title}."""\n\n__version__ = "0.1.0"\n'),
+            FileEntry(
+                f"src/{pkg}/__init__.py",
+                f'"""Generated MCP server for {ctx.ir.title}."""\n\n__version__ = "0.1.0"\n',
+            ),
             FileEntry(f"src/{pkg}/server.py", self._server(pkg, tools)),
             FileEntry(f"src/{pkg}/tools.py", self._tools_module(tools)),
             FileEntry(f"src/{pkg}/client.py", self._http_client(ctx)),
             FileEntry("deploy/agentcore/README.md", self._agentcore_deploy_readme()),
-            FileEntry("deploy/agentcore/agent-config.stub.json", self._agentcore_config_stub(pkg, tools)),
+            FileEntry(
+                "deploy/agentcore/agent-config.stub.json", self._agentcore_config_stub(pkg, tools)
+            ),
             FileEntry("generation-manifest.json", json.dumps(self._manifest(ctx), indent=2) + "\n"),
         ]
         entries.extend(self._embed_agent_rules(ctx))
@@ -45,7 +50,12 @@ class AgentCorePythonPlugin:
             "title": ctx.ir.title,
             "version": ctx.ir.version,
             "tools": [
-                {"name": t.tool_name, "operationId": t.operation_id, "method": t.method, "path": t.path}
+                {
+                    "name": t.tool_name,
+                    "operationId": t.operation_id,
+                    "method": t.method,
+                    "path": t.path,
+                }
                 for t in ctx.tool_map.tools
             ],
             "security": {
@@ -86,14 +96,14 @@ class AgentCorePythonPlugin:
             build-backend = "hatchling.build"
 
             [project]
-            name = "{pkg.replace('_', '-')}"
+            name = "{pkg.replace("_", "-")}"
             version = "0.1.0"
             description = "Generated MCP server for {ctx.ir.title} (AgentCore)"
             requires-python = ">=3.11"
             dependencies = []
 
             [project.scripts]
-            {pkg.replace('_', '-')}-mcp = "{pkg}.server:main"
+            {pkg.replace("_", "-")}-mcp = "{pkg}.server:main"
 
             [tool.hatch.build.targets.wheel]
             packages = ["src/{pkg}"]
@@ -124,8 +134,9 @@ class AgentCorePythonPlugin:
         tool_regs = "\n".join(
             f'    register_tool("{t.tool_name}", TOOLS["{t.tool_name}"])' for t in tools
         )
-        return dedent(
-            f'''\
+        return (
+            dedent(
+                f'''\
             """MCP server entrypoint (stdio skeleton).
 
             Replace register_tool / run_stdio with the pinned MCP Python SDK
@@ -149,9 +160,10 @@ class AgentCorePythonPlugin:
 
             def main() -> None:
             '''
-        ) + (
-            (tool_regs + "\n") if tool_regs else "    pass\n"
-        ) + "    run_stdio()\n\n\nif __name__ == \"__main__\":\n    main()\n"
+            )
+            + ((tool_regs + "\n") if tool_regs else "    pass\n")
+            + '    run_stdio()\n\n\nif __name__ == "__main__":\n    main()\n'
+        )
 
     def _tools_module(self, tools: list[ToolMapping]) -> str:
         payload = {
