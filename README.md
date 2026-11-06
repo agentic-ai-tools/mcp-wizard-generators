@@ -10,14 +10,14 @@ This package is a **library + CLI**. It does **not** run HTTP servers or workers
 
 ## SDK choice (generated Python MCP)
 
-Generated servers use the **official MCP Python SDK** (`mcp` on PyPI):
+Generated servers use the **official MCP Python SDK** (`mcp` on PyPI) **2.x**:
 
 | SDK line | High-level class | Import |
 |----------|------------------|--------|
-| 1.x | **FastMCP** | `from mcp.server.fastmcp import FastMCP` |
-| 2.x (current) | **MCPServer** (FastMCP renamed) | `from mcp.server import MCPServer` |
+| 2.x (pinned) | **MCPServer** | `from mcp.server.mcpserver import MCPServer` |
+| 1.x (legacy) | **FastMCP** | `from mcp.server.fastmcp import FastMCP` |
 
-Templates emit a small import shim and pin `mcp>=1.6,<3` so either line works. Transport is **stdio** for Cursor local MCP. Upstream HTTP calls use **httpx** against `API_BASE_URL`.
+Fresh zips pin `mcp>=2.0.0,<3` and import `MCPServer` (with an optional FastMCP fallback). Transport is **stdio** for Cursor local MCP. Upstream HTTP calls use **httpx** against `API_BASE_URL`. Generated READMEs include a short OS matrix for venv activate (`bin` vs `Scripts`, including Git Bash on Windows).
 
 ## Layout
 

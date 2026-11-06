@@ -89,7 +89,7 @@ python -m mcp_wizard_generators generate-python `
 - Generated tree writes join **POSIX segments** so `src/pkg/file.py` nests correctly on Windows.
 - Executable `chmod` is skipped on Windows (`nt`) and tolerates `OSError` elsewhere.
 - Smoke / docs avoid `/tmp`; use repo-relative `.smoke-out`.
-- Generated project READMEs document both Unix `source .venv/bin/activate` and PowerShell `.\.venv\Scripts\Activate.ps1`.
+- Generated project READMEs include an OS matrix: Unix/macOS/WSL/`Git Bash on Linux` → `.venv/bin/activate`; Windows cmd/PowerShell → `.venv\Scripts\…`; Git Bash on Windows → `Scripts/activate` (typical) with `bin/activate` noted when the venv uses a Unix layout.
 
 ## Recommended day-to-day flow
 
