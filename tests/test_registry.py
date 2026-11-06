@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_wizard_generators.registry import GeneratorRegistry, get_default_registry
 from mcp_wizard_generators.plugins.agentcore import AgentCorePythonPlugin
+from mcp_wizard_generators.registry import GeneratorRegistry, get_default_registry
 
 
 def test_default_registry_has_local_and_agentcore_python() -> None:

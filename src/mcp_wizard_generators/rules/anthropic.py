@@ -26,11 +26,13 @@ class AnthropicRulesEnforcer:
         anthropic_files = [
             p
             for p in rules.originals
-            if p.endswith("CLAUDE.md")
-            or "/.claude/" in p
-            or p.startswith(".claude/")
+            if p.endswith("CLAUDE.md") or "/.claude/" in p or p.startswith(".claude/")
         ]
-        if rules.format_family in {"anthropic", "mixed"} and not anthropic_files and rules.originals:
+        if (
+            rules.format_family in {"anthropic", "mixed"}
+            and not anthropic_files
+            and rules.originals
+        ):
             violations.append(
                 RulesViolation(
                     severity="warn",

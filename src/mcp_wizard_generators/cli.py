@@ -9,9 +9,15 @@ from pathlib import Path
 
 from mcp_wizard_generators.models import AgentRulesBundle, IntermediateRep, SecurityConfig
 from mcp_wizard_generators.packaging import pack_file_tree_to_zip
+from mcp_wizard_generators.paths import resolve_user_path
 from mcp_wizard_generators.pipeline import generate
 from mcp_wizard_generators.python_mcp import generate_python_mcp
 from mcp_wizard_generators.registry import get_default_registry
+
+
+def _path_type(value: str) -> Path:
+    """Argparse type: expand ``~`` on macOS / Windows / Linux."""
+    return resolve_user_path(value)
 
 
 def _load_json(path: Path) -> dict:
@@ -29,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_p.set_defaults(func=cmd_list_targets)
 
     gen = sub.add_parser("generate", help="IR JSON → file tree and/or zip")
-    gen.add_argument("--ir", required=True, type=Path, help="Path to IntermediateRep JSON")
+    gen.add_argument("--ir", required=True, type=_path_type, help="Path to IntermediateRep JSON")
     gen.add_argument("--target", default="local", help="Generator target (default: local)")
     gen.add_argument("--language", default="python")
     gen.add_argument(
@@ -39,11 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Operation id to include (repeatable; default = all)",
     )
     gen.add_argument("--package-name", default="generated_mcp")
-    gen.add_argument("--out-dir", type=Path, help="Write file tree to this directory")
-    gen.add_argument("--zip", type=Path, help="Write zip archive to this path")
-    gen.add_argument("--manifest", type=Path, help="Write generation manifest JSON")
+    gen.add_argument("--out-dir", type=_path_type, help="Write file tree to this directory")
+    gen.add_argument("--zip", type=_path_type, help="Write zip archive to this path")
+    gen.add_argument("--manifest", type=_path_type, help="Write generation manifest JSON")
     gen.add_argument("--auth-mode", default="none")
-    gen.add_argument("--rules-dir", type=Path, help="Optional directory of Agent Rules originals")
+    gen.add_argument(
+        "--rules-dir", type=_path_type, help="Optional directory of Agent Rules originals"
+    )
     gen.add_argument(
         "--rules-family",
         default="unknown",
@@ -57,12 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     py.add_argument(
         "--ir",
-        type=Path,
+        type=_path_type,
         help="Path to IntermediateRep JSON (or simple {title,servers,operations} JSON)",
     )
     py.add_argument(
         "--operations",
-        type=Path,
+        type=_path_type,
         help="Optional JSON file: list of operation ids or operation objects",
     )
     py.add_argument(
@@ -72,8 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Operation id to include (repeatable; alternative to --operations)",
     )
     py.add_argument("--package-name", default="generated_mcp")
-    py.add_argument("--out-dir", type=Path, help="Write file tree to this directory")
-    py.add_argument("--zip", type=Path, help="Write zip archive to this path")
+    py.add_argument("--out-dir", type=_path_type, help="Write file tree to this directory")
+    py.add_argument("--zip", type=_path_type, help="Write zip archive to this path")
     py.add_argument("--auth-mode", default="none")
     py.set_defaults(func=cmd_generate_python)
     return p
@@ -144,7 +152,8 @@ def cmd_generate_python(args: argparse.Namespace) -> int:
         package_name=args.package_name,
         auth_mode=args.auth_mode,
     )
-    print(str(path))
+    # Pathlib str() is OS-native; fine for humans and shell copy-paste.
+    print(path)
     return 0
 
 
