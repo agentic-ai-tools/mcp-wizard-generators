@@ -28,13 +28,16 @@ Force a helper family: `make USE_SH=1 test` or `make USE_PS1=1 test`.
 ```text
 make help
 make bootstrap   # .venv + pip install -e ".[dev]"
-make test        # pytest
-make tox         # tox env_list (pytest + lint)
+make test        # pytest, excluding the e2e marker
+make e2e         # generated server install + stdio tool call (needs network)
+make tox         # tox env_list (pytest + lint, excluding e2e)
 make lint        # ruff format --check + ruff check
 make format      # ruff format + ruff check --fix
 make cli-smoke   # generate pets fixture → .smoke-out / .smoke-out.zip
 make clean
 ```
+
+`make e2e` is opt-in and is not part of `make test`. It needs network access: it generates the pets MCP project, `pip install`s it into a fresh virtualenv, starts `python -m pets_tiny_mcp` over stdio, and calls `listpets` through the MCP client against a local mock API. `make test` and tox pass `-m "not e2e"` so that install stays out of the fast suite.
 
 ## Dual helpers
 
@@ -42,6 +45,7 @@ make clean
 |------|----------------|----------------------|
 | Bootstrap | `scripts/bootstrap.sh` | `scripts/bootstrap.ps1` |
 | Test | `scripts/test.sh` | `scripts/test.ps1` |
+| E2E | `scripts/e2e.sh` | `scripts/e2e.ps1` |
 | Tox | `scripts/test.sh --tox` | `scripts/test.ps1 -Tox` |
 | Lint | `scripts/lint.sh` | `scripts/lint.ps1` |
 | Format | `scripts/format.sh` | `scripts/format.ps1` |

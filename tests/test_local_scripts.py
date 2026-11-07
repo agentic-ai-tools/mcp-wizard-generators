@@ -12,6 +12,7 @@ REQUIRED_SH = [
     "scripts/lint.sh",
     "scripts/format.sh",
     "scripts/cli-smoke.sh",
+    "scripts/e2e.sh",
     "scripts/clean.sh",
 ]
 
@@ -21,6 +22,7 @@ REQUIRED_PS1 = [
     "scripts/lint.ps1",
     "scripts/format.ps1",
     "scripts/cli-smoke.ps1",
+    "scripts/e2e.ps1",
     "scripts/clean.ps1",
 ]
 
@@ -42,9 +44,23 @@ def test_makefile_documents_shell_overrides_and_targets() -> None:
         "tox",
         "lint",
         "cli-smoke",
+        "e2e",
         "docs/local-dev.md",
     ):
         assert needle in text, f"Makefile missing {needle!r}"
+
+
+def test_e2e_marker_is_opt_in() -> None:
+    """Default pytest and tox skip the network install; e2e scripts select it."""
+    assert 'pytest -m "not e2e"' in (ROOT / "scripts" / "test.sh").read_text(encoding="utf-8")
+    assert 'pytest -m "not e2e"' in (ROOT / "scripts" / "test.ps1").read_text(encoding="utf-8")
+    assert 'pytest -m "not e2e"' in (ROOT / "tox.ini").read_text(encoding="utf-8")
+    for rel in ("scripts/e2e.sh", "scripts/e2e.ps1"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        assert "pytest -m e2e" in text, rel
+        assert "not e2e" not in text, rel
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "e2e: install, start, and invoke a generated MCP server" in pyproject
 
 
 def test_tox_ini_defines_pytest_and_lint() -> None:
@@ -64,6 +80,7 @@ def test_local_dev_doc_has_shell_matrix() -> None:
         "Shell matrix",
         "mcp-wizard-gen",
         "forward slashes",
+        "make e2e",
     ):
         assert needle in text, f"docs/local-dev.md missing {needle!r}"
 

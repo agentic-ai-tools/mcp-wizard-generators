@@ -171,10 +171,13 @@ Console script (after install): `mcp-wizard-gen …` (Windows: `.venv\Scripts\mc
 make bootstrap && make test    # or: sh scripts/test.sh
 make lint                      # ruff (required before commit per AGENTS.md)
 make cli-smoke                 # portable generate smoke
+make e2e                       # install + stdio + tool call (needs network; not part of make test)
 make tox                       # optional isolated envs
 ```
 
-Windows PowerShell twins: `.\scripts\bootstrap.ps1`, `.\scripts\test.ps1`, `.\scripts\cli-smoke.ps1`.  
+`make e2e` generates the pets server, installs it in a fresh virtualenv, starts it, and calls `listpets` through an MCP client. It needs network access and is not part of `make test`.
+
+Windows PowerShell twins: `.\scripts\bootstrap.ps1`, `.\scripts\test.ps1`, `.\scripts\e2e.ps1`, `.\scripts\cli-smoke.ps1`.  
 Details and the **macOS / WSL / Git Bash / PowerShell** matrix: [`docs/local-dev.md`](docs/local-dev.md).
 
 Golden coverage: `tests/fixtures/pets_tiny.ir.json` →  

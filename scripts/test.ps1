@@ -23,5 +23,5 @@ if ($Tox) {
   exit $LASTEXITCODE
 }
 
-& $py -m pytest @Rest
+& $py -m pytest -m "not e2e" @Rest
 exit $LASTEXITCODE
