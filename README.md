@@ -161,6 +161,7 @@ Console script (after install): `mcp-wizard-gen …` (Windows: `.venv\Scripts\mc
 | `src/<pkg>/server.py` | FastMCP/MCPServer tools (1:1 with ops) |
 | `src/<pkg>/client.py` | httpx → upstream API |
 | `src/<pkg>/__main__.py` | `python -m <pkg>` stdio entry |
+| `src/<pkg>/verify.py` | `python -m <pkg>.verify` — tool count and metadata (`<dist>-verify` after install) |
 | `generation-manifest.json` | tools + generator metadata |
 
 **Out of scope in this slice:** AgentCore cloud deploy scaffolding, Agent Rules enforcement/embedding, non-Python languages, GitHub repo write delivery.

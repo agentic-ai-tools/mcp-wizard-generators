@@ -49,6 +49,19 @@ python -m pets_tiny_mcp
 Upstream API base URL defaults from the OpenAPI servers list
 (`https://petstore.example.com/v1`). Override with `API_BASE_URL`.
 
+## Verify
+
+Check that the server exposes the tools selected at generation time.
+The command is the same on macOS, Linux, and Windows. It lists tools in-process
+and does not call the upstream API, so `API_BASE_URL` is not required.
+
+```bash
+python -m pets_tiny_mcp.verify
+```
+
+It prints UTF-8 JSON, including `toolCount`, and exits 0 when the exposed tool
+names match. After `pip install`, `pets-tiny-mcp-verify` runs the same check.
+
 ## Configure in Cursor
 
 1. Copy `.cursor/mcp.json` into your project's `.cursor/mcp.json`, **or**
@@ -68,5 +81,6 @@ src/pets_tiny_mcp/
   __main__.py      # python -m pets_tiny_mcp
   server.py        # MCP tools + stdio entry
   client.py        # httpx client → API_BASE_URL
+  verify.py        # python -m pets_tiny_mcp.verify
 generation-manifest.json
 ```

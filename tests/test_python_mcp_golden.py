@@ -26,6 +26,7 @@ EXPECTED_ZIP_MEMBERS = [
     "pets-tiny-mcp/src/pets_tiny_mcp/__main__.py",
     "pets-tiny-mcp/src/pets_tiny_mcp/client.py",
     "pets-tiny-mcp/src/pets_tiny_mcp/server.py",
+    "pets-tiny-mcp/src/pets_tiny_mcp/verify.py",
 ]
 
 
