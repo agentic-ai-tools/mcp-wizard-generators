@@ -33,7 +33,10 @@ include = ["src/mcp_wizard_generators", "tests", "README.md", "pyproject.toml", 
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
+markers = [
+  "e2e: install, start, and invoke a generated MCP server (needs network)",
+]
 
 [tool.ruff]
 target-version = "py311"

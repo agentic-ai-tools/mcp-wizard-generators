@@ -21,4 +21,4 @@ if [ "${1:-}" = "--tox" ]; then
   exec "$PY" -m tox "$@"
 fi
 
-exec "$PY" -m pytest "$@"
+exec "$PY" -m pytest -m "not e2e" "$@"
