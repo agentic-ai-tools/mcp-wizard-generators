@@ -33,6 +33,7 @@ make e2e         # generated server install + stdio tool call (needs network)
 make tox         # tox env_list (pytest + lint, excluding e2e)
 make lint        # ruff format --check + ruff check
 make format      # ruff format + ruff check --fix
+make dist        # wheel + sdist → dist/ (python -m build)
 make cli-smoke   # generate pets fixture → .smoke-out / .smoke-out.zip
 make clean
 ```
@@ -49,6 +50,7 @@ make clean
 | Tox | `scripts/test.sh --tox` | `scripts/test.ps1 -Tox` |
 | Lint | `scripts/lint.sh` | `scripts/lint.ps1` |
 | Format | `scripts/format.sh` | `scripts/format.ps1` |
+| Dist (wheel+sdist) | `scripts/dist.sh` | `scripts/dist.ps1` |
 | CLI smoke | `scripts/cli-smoke.sh` | `scripts/cli-smoke.ps1` |
 | Clean | `scripts/clean.sh` | `scripts/clean.ps1` |
 
@@ -57,6 +59,7 @@ make clean
 | Mechanism | How to invoke |
 |-----------|----------------|
 | Editable install | `pip install -e ".[dev]"` (after venv activate) |
+| Wheel / sdist | `make dist` → `dist/` (see README **Publish**) |
 | Module CLI | `python -m mcp_wizard_generators …` |
 | Console script | `mcp-wizard-gen …` (on PATH after install; Windows: `.venv\Scripts\mcp-wizard-gen.exe`) |
 | Library | `from mcp_wizard_generators import generate_python_mcp` |

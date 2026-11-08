@@ -4,13 +4,32 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-wizard-generators"
-version = "0.2.0"
+version = "0.3.0"
 description = "Pluggable OpenAPI → MCP generators for MCP Wizard (local Python MCP + AgentCore)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "agentic-ai-tools" }]
+keywords = ["mcp", "openapi", "generators", "agentcore", "cursor"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Code Generators",
+  "Typing :: Typed",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/agentic-ai-tools/mcp-wizard-generators"
+Repository = "https://github.com/agentic-ai-tools/mcp-wizard-generators"
+Issues = "https://github.com/agentic-ai-tools/mcp-wizard-generators/issues"
+Documentation = "https://github.com/agentic-ai-tools/mcp-wizard-generators#readme"
 
 [project.optional-dependencies]
 dev = [
@@ -20,6 +39,9 @@ dev = [
   # Runtime smoke for generated local MCP packages (mcp 2.x MCPServer API).
   "mcp>=2.0.0,<3",
   "httpx>=0.27",
+  # Wheel/sdist + GitHub Packages upload (make dist / publish workflow).
+  "build>=1.2",
+  "twine>=5.0",
 ]
 
 [project.scripts]
@@ -29,7 +51,17 @@ mcp-wizard-gen = "mcp_wizard_generators.cli:main"
 packages = ["src/mcp_wizard_generators"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/mcp_wizard_generators", "tests", "README.md", "pyproject.toml", "scripts", "Makefile", "tox.ini", "docs"]
+include = [
+  "src/mcp_wizard_generators",
+  "tests",
+  "README.md",
+  "pyproject.toml",
+  "scripts",
+  "Makefile",
+  "tox.ini",
+  "docs",
+  ".github/workflows",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
