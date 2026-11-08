@@ -1,6 +1,13 @@
 # mcp-wizard-generators
 
+[![CI](https://github.com/agentic-ai-tools/mcp-wizard-generators/actions/workflows/ci.yml/badge.svg)](https://github.com/agentic-ai-tools/mcp-wizard-generators/actions/workflows/ci.yml)
+[![Semgrep](https://img.shields.io/badge/Semgrep-protected-blue)](https://semgrep.dev)
+[![codecov](https://codecov.io/gh/agentic-ai-tools/mcp-wizard-generators/branch/main/graph/badge.svg)](https://codecov.io/gh/agentic-ai-tools/mcp-wizard-generators)
+[![PyPI](https://img.shields.io/pypi/v/mcp-wizard-generators.svg)](https://pypi.org/project/mcp-wizard-generators/)
+
 Pluggable **OpenAPI IR → MCP project** generators for [MCP Wizard](https://github.com/agentic-ai-tools).
+
+**PyPI / dist name:** `mcp-wizard-generators` · **Import:** `mcp_wizard_generators` · **Org:** [`agentic-ai-tools`](https://pypi.org/org/agentic-ai-tools/) (Trusted Publisher when configured)
 
 This package is a **library + CLI**. It does **not** run HTTP servers or workers.  
 `mcp-wizard-api` owns jobs, entitlements, zip/GitHub delivery, and invokes this package offline.
@@ -202,14 +209,21 @@ AgentCore scaffold golden remains under `tests/goldens/agentcore_pets_tiny/`.
 
 ## Publish
 
-Distribution name **`mcp-wizard-generators`** (import **`mcp_wizard_generators`**).
+Distribution name **`mcp-wizard-generators`** (import **`mcp_wizard_generators`**).  
+Publishing target: **PyPI org `agentic-ai-tools`** (OIDC Trusted Publisher stub in CI).
 
 **GitHub Packages does not support a Python/PyPI registry** (roadmap closed as not planned).  
-Do **not** use `*.pypi.pkg.github.com` / `upload.pypi.pkg.github.com` — twine uploads fail with 404 or SSL hostname mismatch.
+Do **not** use `*.pypi.pkg.github.com` / `upload.pypi.pkg.github.com` — twine uploads fail with 404 or SSL hostname mismatch. There is no GitHub Packages PyPI upload workflow in this repo.
 
 ### Install
 
-Until a real PyPI-compatible registry is chosen, install from a git tag:
+**Preferred (once the first PyPI release is live):**
+
+```bash
+pip install mcp-wizard-generators
+```
+
+**Interim** (until that release): install from a git tag or a Release asset:
 
 ```bash
 pip install git+https://github.com/agentic-ai-tools/mcp-wizard-generators.git@v0.3.0
@@ -227,7 +241,7 @@ pip install -e ../mcp-wizard-generators
 ### Build wheel + sdist
 
 ```bash
-make bootstrap   # .[dev] includes build + twine
+make bootstrap   # .[dev] includes build + twine + pytest-cov
 make dist        # → dist/mcp_wizard_generators-<version>-py3-none-any.whl (+ .tar.gz)
 ```
 
@@ -236,7 +250,16 @@ make dist        # → dist/mcp_wizard_generators-<version>-py3-none-any.whl (+ 
 .\scripts\dist.ps1
 ```
 
-### Tag release (CI)
+### CI quality gates
+
+| Check | Workflow | Notes |
+|-------|----------|--------|
+| Lint + tests + coverage | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Coverage floor **80%** (`tool.coverage.report.fail_under`); uploads XML/LCOV via `codecov/codecov-action`. Set **`CODECOV_TOKEN`** (or install the Codecov GitHub App) — required for private repos and recommended after going public. |
+| Semgrep | [`.github/workflows/semgrep.yml`](.github/workflows/semgrep.yml) | Install the **Semgrep GitHub App** on the `agentic-ai-tools` org and/or set **`SEMGREP_APP_TOKEN`**. Uses official `semgrep/semgrep` + `semgrep ci` when the token is present; otherwise OSS rules with `--error`. |
+
+PR CI does **not** require PyPI tokens.
+
+### Tag release (GitHub Release assets)
 
 Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run  
 [`.github/workflows/publish-github-release.yml`](.github/workflows/publish-github-release.yml):
@@ -245,7 +268,17 @@ Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run
 2. `twine check`
 3. Attach `dist/*` as **GitHub Release** assets (`GITHUB_TOKEN`)
 
-`workflow_dispatch` is **build + check only** (no Release upload). A future public PyPI / TestPyPI publish can be added behind optional secrets; it is not wired today.
+`workflow_dispatch` is **build + check only** (no Release upload).
+
+### TestPyPI / PyPI (Trusted Publisher stub)
+
+[`.github/workflows/publish-pypi.yml`](.github/workflows/publish-pypi.yml) publishes with **OIDC** (`pypa/gh-action-pypi-publish`) — no `TWINE_PASSWORD` / API token secrets.
+
+Human setup after org approval:
+
+1. Create a **Trusted Publisher** on TestPyPI and PyPI for project **`mcp-wizard-generators`** → this GitHub repo + `publish-pypi.yml`.
+2. Create GitHub Environments **`testpypi`** and **`pypi`** (optional required reviewers).
+3. Set repository variable **`ENABLE_PYPI_PUBLISH=true`** when tag pushes should publish (or use `workflow_dispatch` with target `testpypi` / `pypi` / `both`).
 
 ## Non-goals (this repo)
 

@@ -1,0 +1,17 @@
+# Coverage expectations for mcp-wizard-generators (library).
+# Upload uses CODECOV_TOKEN (or the Codecov GitHub App) — see README.
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+        # Align with tool.coverage.report.fail_under in pyproject.toml
+        # Codecov "target: auto" tracks the base; CI still enforces the floor.
+    patch:
+      default:
+        target: 80%
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default

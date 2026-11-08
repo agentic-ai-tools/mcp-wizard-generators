@@ -14,3 +14,7 @@ venv/
 .smoke-out/
 .smoke-out.zip
 .DS_Store
+coverage.xml
+coverage.lcov
+.coverage
+htmlcov/

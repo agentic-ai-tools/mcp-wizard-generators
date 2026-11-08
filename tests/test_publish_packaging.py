@@ -134,8 +134,10 @@ def test_make_dist_target_documented() -> None:
     assert "does not support" in readme.lower() and "python" in readme.lower(), (
         "README Publish must note that GitHub Packages does not support Python/PyPI"
     )
+    assert "pip install mcp-wizard-generators" in readme
     assert "git+https://github.com/agentic-ai-tools/mcp-wizard-generators.git@" in readme
     assert "Release" in readme
+    assert "agentic-ai-tools" in readme
 
 
 def test_github_release_publish_workflow() -> None:
