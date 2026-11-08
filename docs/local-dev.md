@@ -104,3 +104,11 @@ python -m mcp_wizard_generators generate-python `
 2. `make bootstrap` (or the matching script for your shell).
 3. `make test` before committing; `make lint` / `make format` per `AGENTS.md`.
 4. `make cli-smoke` when changing CLI or packaging.
+
+## Public install & CI secrets (maintainers)
+
+- Dist / pip name: **`mcp-wizard-generators`**; import: **`mcp_wizard_generators`**.
+- Install: `pip install mcp-wizard-generators` (interim: `git+https://github.com/agentic-ai-tools/mcp-wizard-generators.git@<tag>`).
+- CI uploads coverage with **`CODECOV_TOKEN`** (or Codecov App). Semgrep uses **`SEMGREP_APP_TOKEN`** and/or the Semgrep GitHub App on the org.
+- Coverage floor is **80%** (`tool.coverage.report.fail_under` in `pyproject.toml`).
+- See README **Publish** for Trusted Publisher / TestPyPI → PyPI.

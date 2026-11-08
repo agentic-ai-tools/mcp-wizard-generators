@@ -2,11 +2,12 @@
 #
 # GitHub Packages does NOT support a PyPI registry (roadmap closed as not planned).
 # Do NOT twine-upload to *.pypi.pkg.github.com / upload.pypi.pkg.github.com — those
-# hosts fail with 404 or SSL hostname mismatch.
+# hosts fail with 404 or SSL hostname mismatch. There is no GHP PyPI upload here.
 #
-# Consumers (until a real PyPI-compatible registry is chosen):
-#   pip install git+https://github.com/agentic-ai-tools/mcp-wizard-generators.git@v0.3.0
+# Preferred install (once published): pip install mcp-wizard-generators
+# Interim: pip install git+https://github.com/agentic-ai-tools/mcp-wizard-generators.git@v0.3.0
 # Or download wheel/sdist from the GitHub Release assets for that tag.
+# Optional TestPyPI/PyPI OIDC publish: see publish-pypi.yml (Trusted Publisher).
 
 name: Build and GitHub Release
 

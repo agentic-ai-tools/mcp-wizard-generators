@@ -1,0 +1,56 @@
+# Semgrep AppSec Platform (recommended) or OSS rules fallback.
+#
+# Org setup (required for App-managed policies):
+#   1. Install the Semgrep GitHub App on the agentic-ai-tools org
+#      (or grant it access to this repository).
+#   2. Add repository/org secret SEMGREP_APP_TOKEN from Semgrep AppSec Platform
+#      (Settings → Tokens), OR rely on the App-managed onboarding token path.
+#
+# Official path today: semgrep/semgrep container + `semgrep ci` (semgrep-action
+# is deprecated). When SEMGREP_APP_TOKEN is unset, fall back to curated OSS
+# rules with --error so library CI still fails on findings.
+
+name: Semgrep
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  schedule:
+    - cron: "27 15 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: semgrep/ci
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    if: github.actor != 'dependabot[bot]'
+    env:
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Semgrep scan (App token or OSS fallback)
+        run: |
+          set -eu
+          # Exclude generated goldens (fixtures, not product source).
+          EXCLUDES="--exclude=tests/goldens"
+          if [ -n "${SEMGREP_APP_TOKEN:-}" ]; then
+            echo "Using Semgrep AppSec Platform (SEMGREP_APP_TOKEN / App install)."
+            # App policies decide blocking; `semgrep ci` exits non-zero on blocking findings.
+            semgrep ci $EXCLUDES
+          else
+            echo "SEMGREP_APP_TOKEN unset — OSS rules with --error (library fail-closed)."
+            echo "Install the Semgrep GitHub App on the org and/or set SEMGREP_APP_TOKEN."
+            semgrep scan \
+              --config p/python \
+              --config p/security-audit \
+              --config p/secrets \
+              --error \
+              $EXCLUDES
+          fi

@@ -30,10 +30,13 @@ Homepage = "https://github.com/agentic-ai-tools/mcp-wizard-generators"
 Repository = "https://github.com/agentic-ai-tools/mcp-wizard-generators"
 Issues = "https://github.com/agentic-ai-tools/mcp-wizard-generators/issues"
 Documentation = "https://github.com/agentic-ai-tools/mcp-wizard-generators#readme"
+# PyPI org: agentic-ai-tools — project name mcp-wizard-generators (Trusted Publisher stub).
+Changelog = "https://github.com/agentic-ai-tools/mcp-wizard-generators/releases"
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "pytest-cov>=5.0",
   "tox>=4.0",
   "ruff>=0.6",
   # Runtime smoke for generated local MCP packages (mcp 2.x MCPServer API).
@@ -55,11 +58,15 @@ include = [
   "src/mcp_wizard_generators",
   "tests",
   "README.md",
+  "LICENSE",
+  "SECURITY.md",
+  "CONTRIBUTING.md",
   "pyproject.toml",
   "scripts",
   "Makefile",
   "tox.ini",
   "docs",
+  "codecov.yml",
   ".github/workflows",
 ]
 
@@ -69,6 +76,16 @@ pythonpath = ["src", "tests"]
 markers = [
   "e2e: install, start, and invoke a generated MCP server (needs network)",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["mcp_wizard_generators"]
+omit = ["*/tests/*", "*/goldens/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_empty = true
 
 [tool.ruff]
 target-version = "py311"
