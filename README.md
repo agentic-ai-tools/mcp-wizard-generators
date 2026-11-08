@@ -185,6 +185,7 @@ Console script (after install): `mcp-wizard-gen …` (Windows: `.venv\Scripts\mc
 ```bash
 make bootstrap && make test    # or: sh scripts/test.sh
 make lint                      # ruff (required before commit per AGENTS.md)
+make dist                      # wheel + sdist → dist/
 make cli-smoke                 # portable generate smoke
 make e2e                       # install + stdio + tool call (needs network; not part of make test)
 make tox                       # optional isolated envs
@@ -192,12 +193,57 @@ make tox                       # optional isolated envs
 
 `make e2e` generates the pets server, installs it in a fresh virtualenv, starts it, and calls `listpets` through an MCP client. It needs network access and is not part of `make test`.
 
-Windows PowerShell twins: `.\scripts\bootstrap.ps1`, `.\scripts\test.ps1`, `.\scripts\e2e.ps1`, `.\scripts\cli-smoke.ps1`.  
+Windows PowerShell twins: `.\scripts\bootstrap.ps1`, `.\scripts\test.ps1`, `.\scripts\e2e.ps1`, `.\scripts\dist.ps1`, `.\scripts\cli-smoke.ps1`.  
 Details and the **macOS / WSL / Git Bash / PowerShell** matrix: [`docs/local-dev.md`](docs/local-dev.md).
 
 Golden coverage: `tests/fixtures/pets_tiny.ir.json` →  
 `tests/goldens/python_mcp_pets_tiny/` (+ zip member assertions) for `listPets` + `showPetById`.  
 AgentCore scaffold golden remains under `tests/goldens/agentcore_pets_tiny/`.
+
+## Publish
+
+Distribution name **`mcp-wizard-generators`** (import **`mcp_wizard_generators`**).  
+Publish target is **GitHub Packages** (PyPI-compatible registry under [`agentic-ai-tools`](https://github.com/agentic-ai-tools)) — not public PyPI.
+
+### Build wheel + sdist
+
+```bash
+make bootstrap   # .[dev] includes build + twine
+make dist        # → dist/mcp_wizard_generators-<version>-py3-none-any.whl (+ .tar.gz)
+```
+
+```powershell
+.\scripts\bootstrap.ps1
+.\scripts\dist.ps1
+```
+
+### Install from GitHub Packages
+
+```bash
+pip install mcp-wizard-generators \
+  --index-url https://pypi.pkg.github.com/agentic-ai-tools/simple/
+```
+
+Use a GitHub PAT with `read:packages` (add `repo` if the package is private).  
+Upload endpoint used by CI/twine: `https://upload.pypi.pkg.github.com/agentic-ai-tools/`.
+
+**Near term (before first Packages publish):** install from a sibling path instead:
+
+```bash
+pip install -e ../mcp-wizard-generators
+# or pin a path/Compose mount via MCP_WIZARD_GENERATORS_PATH
+```
+
+### Tag publish (CI stub)
+
+Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run  
+[`.github/workflows/publish-github-packages.yml`](.github/workflows/publish-github-packages.yml):
+
+1. `python -m build`
+2. `twine check`
+3. `twine upload` to `https://upload.pypi.pkg.github.com/agentic-ai-tools/`
+
+`workflow_dispatch` defaults to **dry-run** (build + check only) so the stub can be validated before the first real upload.
 
 ## Non-goals (this repo)
 

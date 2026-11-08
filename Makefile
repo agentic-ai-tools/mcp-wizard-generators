@@ -8,7 +8,7 @@
 #   - macOS / Linux / WSL → scripts/*.sh
 # Override: `make USE_PS1=1 test` or `make USE_SH=1 test`
 
-.PHONY: help bootstrap test e2e tox lint cli-smoke clean format
+.PHONY: help bootstrap test e2e tox lint cli-smoke clean format dist
 
 SHELL := /bin/sh
 
@@ -41,6 +41,7 @@ ifeq ($(USE_WIN_PS),1)
   RUN_SMOKE := $(PS) scripts/cli-smoke.ps1
   RUN_FORMAT := $(PS) scripts/format.ps1
   RUN_CLEAN := $(PS) scripts/clean.ps1
+  RUN_DIST := $(PS) scripts/dist.ps1
 else
   RUN_BOOTSTRAP := sh scripts/bootstrap.sh
   RUN_TEST := sh scripts/test.sh
@@ -50,6 +51,7 @@ else
   RUN_SMOKE := sh scripts/cli-smoke.sh
   RUN_FORMAT := sh scripts/format.sh
   RUN_CLEAN := sh scripts/clean.sh
+  RUN_DIST := sh scripts/dist.sh
 endif
 
 help:
@@ -60,10 +62,11 @@ help:
 	@echo "  make tox         run tox (pytest in isolated envs, skips e2e)"
 	@echo "  make lint        ruff format --check + ruff check"
 	@echo "  make format      ruff format + ruff check --fix"
+	@echo "  make dist        build wheel + sdist into dist/ (python -m build)"
 	@echo "  make cli-smoke   generate pets fixture to .smoke-out(+.zip)"
 	@echo "  make clean       remove caches, venv, smoke artifacts"
 	@echo ""
-	@echo "Windows PowerShell (no Make): .\\scripts\\bootstrap.ps1 | test.ps1 | e2e.ps1 | cli-smoke.ps1"
+	@echo "Windows PowerShell (no Make): .\\scripts\\bootstrap.ps1 | test.ps1 | e2e.ps1 | dist.ps1 | cli-smoke.ps1"
 	@echo "Docs: docs/local-dev.md"
 
 bootstrap:
@@ -86,6 +89,9 @@ format:
 
 cli-smoke:
 	$(RUN_SMOKE)
+
+dist:
+	$(RUN_DIST)
 
 clean:
 	$(RUN_CLEAN)
