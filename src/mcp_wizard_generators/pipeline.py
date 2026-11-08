@@ -13,6 +13,7 @@ from mcp_wizard_generators.models import (
     SecurityConfig,
     ToolMap,
 )
+from mcp_wizard_generators.package_name import validate_package_name
 from mcp_wizard_generators.registry import GeneratorRegistry, get_default_registry
 from mcp_wizard_generators.rules.base import RulesReport
 from mcp_wizard_generators.rules.hooks import apply_agent_rules
@@ -61,9 +62,22 @@ def generate(
     Run the offline generation pipeline.
 
     Intended call site: ``mcp-wizard-api`` Generate Service / worker — not an HTTP server.
+
+    ``selected_operation_ids=None`` means all IR operations. An explicit empty list
+    raises ``ValueError`` (does not expand to all). ``package_name`` is validated
+    before any plugin writes a tree.
     """
+    package_name = validate_package_name(package_name)
     ir_model = ir if isinstance(ir, IntermediateRep) else IntermediateRep.from_dict(ir)
-    selected = selected_operation_ids or [op.id for op in ir_model.operations]
+    if selected_operation_ids is None:
+        selected = [op.id for op in ir_model.operations]
+    elif len(selected_operation_ids) == 0:
+        raise ValueError(
+            "selected_operation_ids must not be an empty list; pass None for all "
+            "operations, or a non-empty selection"
+        )
+    else:
+        selected = list(selected_operation_ids)
     tool_map = build_tool_map(ir_model, selected, tool_name_overrides)
     rules = agent_rules or AgentRulesBundle()
 
