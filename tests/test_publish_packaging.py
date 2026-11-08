@@ -74,11 +74,9 @@ def test_pyproject_publish_metadata() -> None:
 
     license_field = project["license"]
     if isinstance(license_field, dict):
-        assert (
-            "Apache" in license_field.get("text", "") or license_field.get("text") == "Apache-2.0"
-        )
+        assert license_field.get("text") == "MIT"
     else:
-        assert str(license_field) in {"Apache-2.0", "Apache 2.0"}
+        assert str(license_field) == "MIT"
 
     urls = project.get("urls") or {}
     assert "Repository" in urls or "Homepage" in urls
