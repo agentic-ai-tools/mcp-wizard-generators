@@ -11,6 +11,7 @@ README = ROOT / "README.md"
 LICENSE = ROOT / "LICENSE"
 SECURITY = ROOT / "SECURITY.md"
 CONTRIBUTING = ROOT / "CONTRIBUTING.md"
+CODE_OF_CONDUCT = ROOT / "CODE_OF_CONDUCT.md"
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 SEMGREP_WORKFLOW = ROOT / ".github" / "workflows" / "semgrep.yml"
@@ -43,16 +44,27 @@ def test_project_urls_point_at_public_github() -> None:
     assert urls["Issues"].startswith(expected)
 
 
-def test_apache_license_file_present() -> None:
+def test_mit_license_file_present() -> None:
     assert LICENSE.is_file(), "LICENSE required for a public repo"
     text = LICENSE.read_text(encoding="utf-8")
-    assert "Apache License" in text
-    assert "Version 2.0" in text
+    assert "MIT License" in text
+    assert "Copyright (c) 2026 agentic-ai-tools" in text
+    assert "Apache" not in text
     license_field = _load_pyproject()["project"]["license"]
     if isinstance(license_field, dict):
-        assert license_field.get("text") == "Apache-2.0"
+        assert license_field.get("text") == "MIT"
     else:
-        assert str(license_field) == "Apache-2.0"
+        assert str(license_field) == "MIT"
+    classifiers = _load_pyproject()["project"].get("classifiers") or []
+    assert "License :: OSI Approved :: MIT License" in classifiers
+    assert not any("Apache" in c for c in classifiers)
+
+
+def test_code_of_conduct_present() -> None:
+    assert CODE_OF_CONDUCT.is_file(), "CODE_OF_CONDUCT.md required for a public repo"
+    text = CODE_OF_CONDUCT.read_text(encoding="utf-8")
+    assert "Contributor Covenant" in text
+    assert "SECURITY.md" in text or "security" in text.lower()
 
 
 def test_security_and_contributing_docs() -> None:
@@ -65,6 +77,17 @@ def test_security_and_contributing_docs() -> None:
     contributing = CONTRIBUTING.read_text(encoding="utf-8")
     assert "AGENTS.md" in contributing or "pull request" in contributing.lower()
     assert "test" in contributing.lower()
+    assert "CODE_OF_CONDUCT.md" in contributing
+    assert "MIT" in contributing
+    assert "LICENSE" in contributing
+
+
+def test_readme_links_community_docs() -> None:
+    readme = README.read_text(encoding="utf-8")
+    assert "LICENSE" in readme
+    assert "CONTRIBUTING.md" in readme
+    assert "CODE_OF_CONDUCT.md" in readme
+    assert "SECURITY.md" in readme
 
 
 def test_dependabot_github_actions_and_pip() -> None:

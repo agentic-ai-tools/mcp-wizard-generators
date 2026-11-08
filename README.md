@@ -15,6 +15,13 @@ This package is a **library + CLI**. It does **not** run HTTP servers or workers
 **Near-term slice:** `local` + `python` — runnable Anthropic-style MCP server zip + Cursor config.  
 **Also registered:** `agentcore` + `python` scaffold (AgentCore deploy stubs; expand later).
 
+## Community
+
+- **License:** [MIT](LICENSE)
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Code of Conduct:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- **Security:** [SECURITY.md](SECURITY.md)
+
 ## SDK choice (generated Python MCP)
 
 Generated servers use the **official MCP Python SDK** (`mcp` on PyPI) **2.x**:
