@@ -15,7 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "pyproject.toml"
 README = ROOT / "README.md"
 MAKEFILE = ROOT / "Makefile"
-PUBLISH_WORKFLOW = ROOT / ".github" / "workflows" / "publish-github-packages.yml"
+PUBLISH_WORKFLOW = ROOT / ".github" / "workflows" / "publish-github-release.yml"
+LEGACY_PACKAGES_WORKFLOW = ROOT / ".github" / "workflows" / "publish-github-packages.yml"
+# Live endpoint usage (install/upload) — warning prose may still name the hosts.
+GHP_PYPI_ENDPOINT_RE = re.compile(
+    r"(?:--index-url|--repository-url)\s+https?://(?:upload\.)?pypi\.pkg\.github\.com"
+    r"|https://(?:upload\.)?pypi\.pkg\.github\.com/[^\s`)]+/",
+    re.IGNORECASE,
+)
 SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
@@ -119,18 +126,37 @@ def test_make_dist_target_documented() -> None:
 
     readme = README.read_text(encoding="utf-8")
     assert re.search(r"(?m)^## Publish\b", readme), "README needs a ## Publish section"
-    assert "pypi.pkg.github.com/agentic-ai-tools" in readme
     assert "make dist" in readme
+    # GitHub Packages has no PyPI registry — do not document live install/upload endpoints.
+    assert not GHP_PYPI_ENDPOINT_RE.search(readme), (
+        "README must not give live *.pypi.pkg.github.com install/upload URLs"
+    )
+    assert "does not support" in readme.lower() and "python" in readme.lower(), (
+        "README Publish must note that GitHub Packages does not support Python/PyPI"
+    )
+    assert "git+https://github.com/agentic-ai-tools/mcp-wizard-generators.git@" in readme
+    assert "Release" in readme
 
 
-def test_github_packages_publish_workflow_stub() -> None:
-    assert PUBLISH_WORKFLOW.is_file(), f"missing workflow stub: {PUBLISH_WORKFLOW}"
+def test_github_release_publish_workflow() -> None:
+    """Tag CI builds artifacts and attaches them to a GitHub Release (not GHP PyPI)."""
+    assert not LEGACY_PACKAGES_WORKFLOW.is_file(), (
+        "legacy publish-github-packages.yml must be removed/renamed "
+        "(GitHub Packages has no PyPI registry)"
+    )
+    assert PUBLISH_WORKFLOW.is_file(), f"missing release workflow: {PUBLISH_WORKFLOW}"
     text = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
-    assert "pypi.pkg.github.com/agentic-ai-tools" in text
-    assert "tags:" in text or "tags'" in text or "tags:" in text
-    assert "packages: write" in text or "packages:write" in text
-    assert "twine" in text
-    assert "build" in text
+    assert not GHP_PYPI_ENDPOINT_RE.search(text), (
+        "workflow must not twine-upload to *.pypi.pkg.github.com"
+    )
+    assert "twine upload" not in text
+    assert "tags:" in text
+    assert "python -m build" in text or "build" in text
+    assert "twine check" in text or "twine" in text
+    # Release asset upload via GITHUB_TOKEN (works); not packages: write for a fake PyPI.
+    assert "contents: write" in text or "contents:write" in text
+    assert "gh release" in text or "softprops/action-gh-release" in text or "upload-release" in text
+    assert "packages: write" not in text and "packages:write" not in text
 
 
 def test_make_dist_builds_wheel_and_sdist(tmp_path: Path) -> None:

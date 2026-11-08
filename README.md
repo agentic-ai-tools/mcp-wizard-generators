@@ -202,8 +202,27 @@ AgentCore scaffold golden remains under `tests/goldens/agentcore_pets_tiny/`.
 
 ## Publish
 
-Distribution name **`mcp-wizard-generators`** (import **`mcp_wizard_generators`**).  
-Publish target is **GitHub Packages** (PyPI-compatible registry under [`agentic-ai-tools`](https://github.com/agentic-ai-tools)) — not public PyPI.
+Distribution name **`mcp-wizard-generators`** (import **`mcp_wizard_generators`**).
+
+**GitHub Packages does not support a Python/PyPI registry** (roadmap closed as not planned).  
+Do **not** use `*.pypi.pkg.github.com` / `upload.pypi.pkg.github.com` — twine uploads fail with 404 or SSL hostname mismatch.
+
+### Install
+
+Until a real PyPI-compatible registry is chosen, install from a git tag:
+
+```bash
+pip install git+https://github.com/agentic-ai-tools/mcp-wizard-generators.git@v0.3.0
+```
+
+Or download the wheel/sdist from the [GitHub Release](https://github.com/agentic-ai-tools/mcp-wizard-generators/releases) assets for that tag.
+
+**Local / sibling path (development):**
+
+```bash
+pip install -e ../mcp-wizard-generators
+# or pin a path/Compose mount via MCP_WIZARD_GENERATORS_PATH
+```
 
 ### Build wheel + sdist
 
@@ -217,33 +236,16 @@ make dist        # → dist/mcp_wizard_generators-<version>-py3-none-any.whl (+ 
 .\scripts\dist.ps1
 ```
 
-### Install from GitHub Packages
-
-```bash
-pip install mcp-wizard-generators \
-  --index-url https://pypi.pkg.github.com/agentic-ai-tools/simple/
-```
-
-Use a GitHub PAT with `read:packages` (add `repo` if the package is private).  
-Upload endpoint used by CI/twine: `https://upload.pypi.pkg.github.com/agentic-ai-tools/`.
-
-**Near term (before first Packages publish):** install from a sibling path instead:
-
-```bash
-pip install -e ../mcp-wizard-generators
-# or pin a path/Compose mount via MCP_WIZARD_GENERATORS_PATH
-```
-
-### Tag publish (CI stub)
+### Tag release (CI)
 
 Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run  
-[`.github/workflows/publish-github-packages.yml`](.github/workflows/publish-github-packages.yml):
+[`.github/workflows/publish-github-release.yml`](.github/workflows/publish-github-release.yml):
 
 1. `python -m build`
 2. `twine check`
-3. `twine upload` to `https://upload.pypi.pkg.github.com/agentic-ai-tools/`
+3. Attach `dist/*` as **GitHub Release** assets (`GITHUB_TOKEN`)
 
-`workflow_dispatch` defaults to **dry-run** (build + check only) so the stub can be validated before the first real upload.
+`workflow_dispatch` is **build + check only** (no Release upload). A future public PyPI / TestPyPI publish can be added behind optional secrets; it is not wired today.
 
 ## Non-goals (this repo)
 
