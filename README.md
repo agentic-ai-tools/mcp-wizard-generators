@@ -53,11 +53,25 @@ out = generate_python_mcp(
     operations=["listPets", "showPetById"],  # ids — or list of simple op dicts
     out_dir=workdir / "pets-mcp",
     zip_path=workdir / "pets-mcp.zip",  # optional
-    package_name="pets_tiny_mcp",
+    package_name="pets_tiny_mcp",  # validated: ^[a-z][a-z0-9_]{0,62}$
     auth_mode="none",  # none | api_key | oauth2
 )
 # out → Path(out_dir) if out_dir set, else Path(zip_path)
 ```
+
+**`package_name`:** must match `^[a-z][a-z0-9_]{0,62}$`. Python keywords and a small denylist
+(`os`, `sys`, `mcp`, …) are rejected. Invalid names raise **before** any tree/zip is written.
+Reuse `validate_package_name` from this package if the API needs the same predicate.
+
+**`operations` semantics:**
+
+| Input | Behavior |
+|-------|----------|
+| `None` / omit | All IR operations (CLI convenience) |
+| Non-empty ids / op dicts | Only those operations |
+| Explicit `[]` | **Raises** `ValueError` (does **not** mean all) |
+
+Hosted generate should always pass a non-empty id list.
 
 **Simple operations JSON** (no full IR) is also accepted:
 

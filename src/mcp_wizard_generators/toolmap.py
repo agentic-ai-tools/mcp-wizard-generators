@@ -22,9 +22,15 @@ def build_tool_map(
     selected_operation_ids: list[str] | None = None,
     name_overrides: dict[str, str] | None = None,
 ) -> ToolMap:
-    """Map selected IR ops to MCP tools. Empty selection → all operations."""
+    """
+    Map selected IR ops to MCP tools.
+
+    ``selected_operation_ids=None`` → all operations.
+    An explicit empty list → no tools (does **not** mean all). Callers that want
+    “all” must pass ``None``; ``generate_python_mcp`` raises on ``operations=[]``.
+    """
     overrides = name_overrides or {}
-    selected = set(selected_operation_ids) if selected_operation_ids else None
+    selected = None if selected_operation_ids is None else set(selected_operation_ids)
     tools: list[ToolMapping] = []
 
     for op in ir.operations:

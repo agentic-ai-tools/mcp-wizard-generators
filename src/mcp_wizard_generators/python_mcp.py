@@ -7,8 +7,20 @@ from pathlib import Path
 from typing import Any
 
 from mcp_wizard_generators.models import IntermediateRep, SecurityConfig
+from mcp_wizard_generators.package_name import validate_package_name
 from mcp_wizard_generators.packaging import pack_file_tree_to_zip
 from mcp_wizard_generators.pipeline import GenerateResult, generate
+
+
+def _reject_empty_operations(
+    operations: Sequence[str] | Sequence[dict[str, Any]] | None,
+) -> None:
+    """Explicit ``operations=[]`` must not mean all — raise; ``None`` may mean all."""
+    if operations is not None and len(operations) == 0:
+        raise ValueError(
+            "operations must not be an empty list; pass None/omit for all operations "
+            "(CLI convenience), or a non-empty selection of operation ids"
+        )
 
 
 def _operation_from_simple(op: dict[str, Any], index: int) -> dict[str, Any]:
@@ -65,6 +77,10 @@ def coerce_spec(
     Returns ``(ir, selected_operation_ids)``. When ``operations`` is a list of
     operation dicts, they become the IR operation set and selection is all of them
     (unless ``spec`` already carried a fuller catalog and ``operations`` are ids).
+
+    ``operations=None`` (omit) means “all ops” for callers that resolve selection
+    later. An explicit empty list is rejected by ``generate_python_mcp`` /
+    ``generate_python_mcp_result`` before generation.
     """
     selected_ids: list[str] | None = None
     op_dicts: list[dict[str, Any]] | None = None
@@ -113,15 +129,24 @@ def generate_python_mcp(
 
     - ``spec``: IntermediateRep, IR JSON dict, or a minimal ``{title, servers, operations}``
     - ``operations``: selected operation ids **or** a list of simple operation dicts
-      (``method``, ``path``, ``operationId``, ``summary``, ``params``)
+      (``method``, ``path``, ``operationId``, ``summary``, ``params``).
+      Explicit ``operations=[]`` raises ``ValueError`` (does **not** mean all).
+      ``None`` / omit may mean all operations (CLI convenience). API should always
+      pass a non-empty id list.
+    - ``package_name``: validated snake_case identifier (see ``validate_package_name``)
     - ``out_dir``: write the project tree here (created if needed)
     - ``zip_path``: optional zip archive of the same tree
 
     Returns ``Path(out_dir)`` when ``out_dir`` is set; otherwise ``Path(zip_path)``.
     At least one of ``out_dir`` / ``zip_path`` is required.
+
+    Validation runs before any tree or zip is written.
     """
     if out_dir is None and zip_path is None:
         raise ValueError("generate_python_mcp requires out_dir and/or zip_path")
+
+    _reject_empty_operations(operations)
+    package_name = validate_package_name(package_name)
 
     ir, selected = coerce_spec(spec, operations)
     sec = security or SecurityConfig(auth_mode=auth_mode)
@@ -155,11 +180,17 @@ def generate_python_mcp_result(
     operations: Sequence[str] | Sequence[dict[str, Any]] | None = None,
     **kwargs: Any,
 ) -> GenerateResult:
-    """Same inputs as ``generate_python_mcp``, but return the in-memory ``GenerateResult``."""
+    """
+    Same inputs as ``generate_python_mcp``, but return the in-memory ``GenerateResult``.
+
+    Explicit ``operations=[]`` raises; ``None`` may mean all. ``package_name`` is
+    validated before generation.
+    """
+    _reject_empty_operations(operations)
     ir, selected = coerce_spec(spec, operations)
     auth_mode = kwargs.pop("auth_mode", "none")
     security = kwargs.pop("security", None) or SecurityConfig(auth_mode=auth_mode)
-    package_name = kwargs.pop("package_name", "generated_mcp")
+    package_name = validate_package_name(kwargs.pop("package_name", "generated_mcp"))
     tool_name_overrides = kwargs.pop("tool_name_overrides", None)
     if kwargs:
         raise TypeError(f"Unexpected kwargs: {sorted(kwargs)}")

@@ -26,3 +26,10 @@ def test_build_tool_map_selection_and_override() -> None:
     )
     assert len(tm.tools) == 1
     assert tm.tools[0].tool_name == "list_all_pets"
+
+
+def test_build_tool_map_explicit_empty_is_not_all() -> None:
+    """Explicit [] must not expand to all ops (None means all)."""
+    ir = IntermediateRep.from_dict(json.loads((FIXTURES / "pets_tiny.ir.json").read_text()))
+    tm = build_tool_map(ir, selected_operation_ids=[])
+    assert tm.tools == []
