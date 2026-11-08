@@ -17,6 +17,19 @@ def _slug_tool_name(operation_id: str | None, method: str, path: str) -> str:
     return slug
 
 
+def _unique_tool_name(name: str, seen: set[str]) -> str:
+    """Keep each MCP tool name unique. The SDK registers only the first copy of a name."""
+    if name not in seen:
+        seen.add(name)
+        return name
+    suffix = 2
+    while f"{name}_{suffix}" in seen:
+        suffix += 1
+    unique = f"{name}_{suffix}"
+    seen.add(unique)
+    return unique
+
+
 def build_tool_map(
     ir: IntermediateRep,
     selected_operation_ids: list[str] | None = None,
@@ -32,11 +45,15 @@ def build_tool_map(
     overrides = name_overrides or {}
     selected = None if selected_operation_ids is None else set(selected_operation_ids)
     tools: list[ToolMapping] = []
+    seen_names: set[str] = set()
 
     for op in ir.operations:
         if selected is not None and op.id not in selected:
             continue
-        tool_name = overrides.get(op.id) or _slug_tool_name(op.operation_id, op.method, op.path)
+        tool_name = _unique_tool_name(
+            overrides.get(op.id) or _slug_tool_name(op.operation_id, op.method, op.path),
+            seen_names,
+        )
         description = op.summary or op.description or f"{op.method.upper()} {op.path}"
         schema = op.input_schema or {"type": "object", "properties": {}}
         tools.append(

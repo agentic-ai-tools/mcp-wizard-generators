@@ -60,6 +60,7 @@ class PythonMcpPlugin:
             "sdk": "mcp (official Python SDK; MCPServer high-level API, mcp>=2,<3)",
             "title": ctx.ir.title,
             "version": ctx.ir.version,
+            "package": ctx.package_name,
             "tools": [
                 {
                     "name": t.tool_name,
@@ -293,6 +294,7 @@ class PythonMcpPlugin:
                 import asyncio
                 import json
                 import sys
+                from collections import Counter
                 from pathlib import Path
                 from typing import Any
 
@@ -300,19 +302,41 @@ class PythonMcpPlugin:
 
 
                 def _find_manifest() -> Path | None:
-                    """Return generation-manifest.json from cwd or this file, walking parents."""
-                    starts = [Path.cwd().resolve(), Path(__file__).resolve().parent]
-                    seen: set[Path] = set()
-                    for start in starts:
-                        current = start
-                        while current not in seen:
-                            seen.add(current)
-                            candidate = current / "generation-manifest.json"
-                            if candidate.is_file():
-                                return candidate
-                            if current.parent == current:
-                                break
-                            current = current.parent
+                    """Find this package's generation-manifest.json, not an unrelated ancestor.
+
+                    Searches the working directory and up to three parents, plus the
+                    src-layout project root next to this file (``src/<pkg>/verify.py``).
+                    A manifest is used only when its ``package`` matches, or when it has
+                    no package field and sits in the working directory or that project root.
+                    """
+                    expected_pkg = EXPECTED["package"]
+                    src_project = Path(__file__).resolve().parents[2]
+                    cwd = Path.cwd().resolve()
+                    directories: list[Path] = []
+                    current = cwd
+                    for _ in range(4):
+                        directories.append(current)
+                        if current.parent == current:
+                            break
+                        current = current.parent
+                    if src_project not in directories:
+                        directories.append(src_project)
+                    local_dirs = {cwd, src_project}
+                    for directory in directories:
+                        path = directory / "generation-manifest.json"
+                        if not path.is_file():
+                            continue
+                        try:
+                            data = json.loads(path.read_text(encoding="utf-8"))
+                        except (OSError, json.JSONDecodeError, TypeError):
+                            if directory in local_dirs:
+                                return path
+                            continue
+                        if not isinstance(data, dict):
+                            continue
+                        package = data.get("package")
+                        if package == expected_pkg or (package is None and directory in local_dirs):
+                            return path
                     return None
 
 
@@ -347,8 +371,18 @@ class PythonMcpPlugin:
                             }
                         )
                     expected_names = [item["name"] for item in EXPECTED["tools"]]
-                    missing = [name for name in expected_names if name not in names]
-                    unexpected = [name for name in names if name not in expected_names]
+                    live_counts = Counter(names)
+                    expected_counts = Counter(expected_names)
+                    missing: list[str] = []
+                    for name, count in expected_counts.items():
+                        deficit = count - live_counts.get(name, 0)
+                        if deficit > 0:
+                            missing.extend([name] * deficit)
+                    unexpected: list[str] = []
+                    for name, count in live_counts.items():
+                        extra = count - expected_counts.get(name, 0)
+                        if extra > 0:
+                            unexpected.extend([name] * extra)
                     report: dict[str, Any] = {
                         "ok": not missing and not unexpected,
                         "package": EXPECTED["package"],
