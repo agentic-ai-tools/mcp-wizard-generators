@@ -1,0 +1,61 @@
+# Build mcp-wizard-generators on version tags and attach wheel/sdist to a GitHub Release.
+#
+# GitHub Packages does NOT support a PyPI registry (roadmap closed as not planned).
+# Do NOT twine-upload to *.pypi.pkg.github.com / upload.pypi.pkg.github.com — those
+# hosts fail with 404 or SSL hostname mismatch.
+#
+# Consumers (until a real PyPI-compatible registry is chosen):
+#   pip install git+https://github.com/agentic-ai-tools/mcp-wizard-generators.git@v0.3.0
+# Or download wheel/sdist from the GitHub Release assets for that tag.
+
+name: Build and GitHub Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Check dist artifacts
+        run: |
+          python -m twine check dist/*
+          ls -la dist/
+
+      # Publish step: attach dist/* as GitHub Release assets (GITHUB_TOKEN works).
+      # Intentionally no Twine publish to GitHub Packages (no PyPI registry there).
+      - name: Create GitHub Release and upload dist assets
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release create "${GITHUB_REF_NAME}" dist/*
+          --title "${GITHUB_REF_NAME}"
+          --generate-notes
+          --verify-tag
+
+      - name: Skip Release upload (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "workflow_dispatch: build + twine check only (no GitHub Release upload)."
+          echo "Push a v* tag to create a Release with dist assets."
