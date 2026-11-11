@@ -294,7 +294,9 @@ Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run
 
 Triggers: push to any branch (skips `dependabot[bot]`) and `workflow_dispatch`. Quality must succeed before build/publish on every channel.
 
-Trusted Publisher is linked for project **`mcp-wizard-generators`** → this repo + `publish-pypi.yml`, with GitHub Environments **`testpypi`** and **`pypi`**. Optional emergency kill-switch: set repository variable **`ENABLE_PYPI_PUBLISH=false`** to skip publish jobs (unset / any other value allows publish).
+Trusted Publisher should be configured for project **`mcp-wizard-generators`** → this repo + `publish-pypi.yml`, with GitHub Environments **`testpypi`** and **`pypi`**.
+
+OIDC upload is **opt-in**: set repository variable **`ENABLE_PYPI_PUBLISH=true`** only after Trusted Publisher claims match (workflow + environments). When unset, push still runs version → quality → build (dry-run) but skips upload so feature-branch PR checks stay green. Unset or set **`ENABLE_PYPI_PUBLISH=false`** to kill-switch publishing after it is enabled. No `pull_request` trigger on this workflow.
 
 ## Non-goals (this repo)
 

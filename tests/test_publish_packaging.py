@@ -198,7 +198,9 @@ def test_publish_pypi_branch_channel_workflow() -> None:
     assert "environment: pypi" in text or re.search(r"environment:\s*\n\s+name:\s*pypi", text)
     assert "TWINE_PASSWORD" not in text
     assert "PYPI_API_TOKEN" not in text
-    assert "pull_request" not in text
+    # Push / dispatch only — never wire PR events (keeps PR CI free of OIDC upload).
+    on_block = text.split("jobs:", 1)[0]
+    assert "pull_request" not in on_block
 
     # Push triggers: main, release/**, feature branches; skip dependabot.
     assert "main" in text
@@ -210,7 +212,9 @@ def test_publish_pypi_branch_channel_workflow() -> None:
 
     # Quality before any publish; TestPyPI for all; PyPI for release only.
     assert "test.pypi.org" in text or "testpypi" in text.lower()
-    assert "ENABLE_PYPI_PUBLISH" in text  # emergency kill-switch only
+    # Opt-in OIDC upload so unset/misconfigured Trusted Publisher does not
+    # fail feature-branch push checks associated with open PRs.
+    assert "ENABLE_PYPI_PUBLISH == 'true'" in text or 'ENABLE_PYPI_PUBLISH == "true"' in text
     assert "version.txt" in text
     assert "__init__.py" in text or "__version__" in text
     assert "twine check" in text or "twine" in text

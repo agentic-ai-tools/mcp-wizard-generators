@@ -168,8 +168,9 @@ def test_trusted_publisher_stub_oidc_no_pr_secrets() -> None:
     # Must not use long-lived password tokens.
     assert "TWINE_PASSWORD" not in text
     assert "PYPI_API_TOKEN" not in text
-    # Not on pull_request (PR CI stays secret-free for publish).
-    assert "pull_request" not in text
+    # Triggers must not include PR events (PR CI stays secret-free for publish).
+    on_block = text.split("jobs:", 1)[0]
+    assert "pull_request" not in on_block
 
 
 def test_readme_public_install_and_badges() -> None:

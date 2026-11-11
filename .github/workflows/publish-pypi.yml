@@ -11,11 +11,16 @@
 #
 # Quality (lint + test + Semgrep) must pass before build/publish on every channel.
 #
-# Optional emergency kill-switch: set repository variable ENABLE_PYPI_PUBLISH=false
-# to skip publish jobs (unset / any other value allows publish once Trusted Publisher
-# is linked). Environments: testpypi / pypi.
+# OIDC upload gate: set repository variable ENABLE_PYPI_PUBLISH=true only after
+# Trusted Publisher is linked for this workflow + envs testpypi/pypi. When unset
+# or not exactly "true", version/quality/build still run (dry-run) but publish
+# jobs are skipped so feature-branch pushes do not fail PR required checks with
+# invalid-publisher. Set ENABLE_PYPI_PUBLISH=false (or unset) as an emergency
+# kill-switch once publishing is enabled.
 #
-# Tag pushes still attach dist assets via publish-github-release.yml.
+# Triggers are push + workflow_dispatch only (never PR events), so PR CI stays
+# free of publish credentials. Tag pushes still attach dist via
+# publish-github-release.yml.
 
 name: Publish to TestPyPI / PyPI
 
@@ -189,7 +194,7 @@ jobs:
     needs: [version, quality, build]
     if: >
       github.actor != 'dependabot[bot]' &&
-      vars.ENABLE_PYPI_PUBLISH != 'false' &&
+      vars.ENABLE_PYPI_PUBLISH == 'true' &&
       needs.version.result == 'success' &&
       needs.quality.result == 'success' &&
       needs.build.result == 'success'
@@ -216,7 +221,7 @@ jobs:
     needs: [version, quality, build, publish-testpypi]
     if: >
       github.actor != 'dependabot[bot]' &&
-      vars.ENABLE_PYPI_PUBLISH != 'false' &&
+      vars.ENABLE_PYPI_PUBLISH == 'true' &&
       needs.version.outputs.publish_pypi == 'true' &&
       needs.version.result == 'success' &&
       needs.quality.result == 'success' &&
