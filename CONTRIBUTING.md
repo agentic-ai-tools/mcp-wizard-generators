@@ -52,4 +52,4 @@ pip install mcp-wizard-generators
 
 Distribution name: **`mcp-wizard-generators`**. Install (once published): `pip install mcp-wizard-generators`.
 
-Tag releases (`v*`) build artifacts for GitHub Release assets. Optional OIDC Trusted Publisher publish to TestPyPI / PyPI is stubbed in `.github/workflows/publish-pypi.yml` and requires org setup (see README).
+Tag releases (`v*`) build artifacts for GitHub Release assets. Branch-based OIDC Trusted Publisher publish to TestPyPI / PyPI is in `.github/workflows/publish-pypi.yml` (feature/main → TestPyPI; `release/X.Y.Z` → TestPyPI then PyPI). See README Publish matrix.

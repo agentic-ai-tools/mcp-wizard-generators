@@ -16,6 +16,10 @@ PYPROJECT = ROOT / "pyproject.toml"
 README = ROOT / "README.md"
 MAKEFILE = ROOT / "Makefile"
 PUBLISH_WORKFLOW = ROOT / ".github" / "workflows" / "publish-github-release.yml"
+PUBLISH_PYPI_WORKFLOW = ROOT / ".github" / "workflows" / "publish-pypi.yml"
+QUALITY_WORKFLOW = ROOT / ".github" / "workflows" / "quality.yml"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+COMPUTE_VERSION_SCRIPT = ROOT / "scripts" / "compute_pep440_version.py"
 LEGACY_PACKAGES_WORKFLOW = ROOT / ".github" / "workflows" / "publish-github-packages.yml"
 # Live endpoint usage (install/upload) — warning prose may still name the hosts.
 GHP_PYPI_ENDPOINT_RE = re.compile(
@@ -94,10 +98,12 @@ def test_pyproject_publish_metadata() -> None:
     )
 
     optional = project.get("optional-dependencies") or {}
-    # build/twine needed for make dist + publish path
+    # build/twine needed for make dist + publish path; packaging for PEP 440 script
     joined = " ".join(dep for deps in optional.values() for dep in deps)
     assert "build" in joined
     assert "twine" in joined
+    assert "packaging" in joined
+    assert COMPUTE_VERSION_SCRIPT.is_file(), f"missing {COMPUTE_VERSION_SCRIPT}"
 
 
 def test_version_matches_package_dunder() -> None:
@@ -136,6 +142,11 @@ def test_make_dist_target_documented() -> None:
     assert "git+https://github.com/agentic-ai-tools/mcp-wizard-generators.git@" in readme
     assert "Release" in readme
     assert "agentic-ai-tools" in readme
+    # Branch → version → index matrix
+    assert ".dev" in readme
+    assert "rc" in readme.lower() or "release candidate" in readme.lower()
+    assert "TestPyPI" in readme
+    assert "release/X.Y.Z" in readme or "release/`X.Y.Z`" in readme or "`release/" in readme
 
 
 def test_github_release_publish_workflow() -> None:
@@ -157,6 +168,53 @@ def test_github_release_publish_workflow() -> None:
     assert "contents: write" in text or "contents:write" in text
     assert "gh release" in text or "softprops/action-gh-release" in text or "upload-release" in text
     assert "packages: write" not in text and "packages:write" not in text
+
+
+def test_reusable_quality_workflow_and_ci_wiring() -> None:
+    assert QUALITY_WORKFLOW.is_file(), f"missing {QUALITY_WORKFLOW}"
+    quality = QUALITY_WORKFLOW.read_text(encoding="utf-8")
+    assert "workflow_call" in quality
+    assert "ruff" in quality
+    assert "pytest" in quality
+    assert "3.11" in quality and "3.12" in quality
+    assert "semgrep" in quality.lower()
+
+    assert CI_WORKFLOW.is_file(), f"missing {CI_WORKFLOW}"
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+    assert "quality.yml" in ci
+    assert "workflow_call" in quality
+    assert "release/**" in ci or "release/*" in ci
+
+
+def test_publish_pypi_branch_channel_workflow() -> None:
+    """Branch-based publish: quality → build → TestPyPI; release also → PyPI."""
+    assert PUBLISH_PYPI_WORKFLOW.is_file(), f"missing {PUBLISH_PYPI_WORKFLOW}"
+    text = PUBLISH_PYPI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "workflow_dispatch" in text
+    assert "pypa/gh-action-pypi-publish" in text
+    assert "id-token: write" in text or "id-token:write" in text
+    assert "environment: testpypi" in text or "environment:\n      name: testpypi" in text
+    assert "environment: pypi" in text or re.search(r"environment:\s*\n\s+name:\s*pypi", text)
+    assert "TWINE_PASSWORD" not in text
+    assert "PYPI_API_TOKEN" not in text
+    assert "pull_request" not in text
+
+    # Push triggers: main, release/**, feature branches; skip dependabot.
+    assert "main" in text
+    assert "release/**" in text or "release/*" in text
+    assert "dependabot" in text.lower()
+    # Primary path is branch push, not tag-only.
+    assert "compute_pep440_version" in text
+    assert "quality.yml" in text or "needs: quality" in text or "needs:\n      - quality" in text
+
+    # Quality before any publish; TestPyPI for all; PyPI for release only.
+    assert "test.pypi.org" in text or "testpypi" in text.lower()
+    assert "ENABLE_PYPI_PUBLISH" in text  # emergency kill-switch only
+    assert "version.txt" in text
+    assert "__init__.py" in text or "__version__" in text
+    assert "twine check" in text or "twine" in text
+    assert "python -m build" in text or "pyproject-build" in text
 
 
 def test_make_dist_builds_wheel_and_sdist(tmp_path: Path) -> None:

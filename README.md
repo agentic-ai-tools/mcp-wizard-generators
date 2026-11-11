@@ -261,10 +261,10 @@ make dist        # → dist/mcp_wizard_generators-<version>-py3-none-any.whl (+ 
 
 | Check | Workflow | Notes |
 |-------|----------|--------|
-| Lint + tests + coverage | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Coverage floor **80%** (`tool.coverage.report.fail_under`); uploads XML/LCOV via `codecov/codecov-action`. Set **`CODECOV_TOKEN`** (or install the Codecov GitHub App) — required for private repos and recommended after going public. |
-| Semgrep | [`.github/workflows/semgrep.yml`](.github/workflows/semgrep.yml) | Install the **Semgrep GitHub App** on the `agentic-ai-tools` org and/or set **`SEMGREP_APP_TOKEN`**. Uses official `semgrep/semgrep` + `semgrep ci` when the token is present; otherwise OSS rules with `--error`. |
+| Lint + tests + coverage + Semgrep | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) → reusable [`.github/workflows/quality.yml`](.github/workflows/quality.yml) | Coverage floor **80%** (`tool.coverage.report.fail_under`); uploads XML/LCOV via `codecov/codecov-action`. Set **`CODECOV_TOKEN`** (or install the Codecov GitHub App). Push CI also covers `release/**`. |
+| Semgrep (schedule / standalone) | [`.github/workflows/semgrep.yml`](.github/workflows/semgrep.yml) | Install the **Semgrep GitHub App** on the `agentic-ai-tools` org and/or set **`SEMGREP_APP_TOKEN`**. Uses official `semgrep/semgrep` + `semgrep ci` when the token is present; otherwise OSS rules with `--error`. |
 
-PR CI does **not** require PyPI tokens.
+PR CI does **not** require PyPI tokens. Publish runs the same `quality.yml` gate before any index upload.
 
 ### Tag release (GitHub Release assets)
 
@@ -275,17 +275,26 @@ Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run
 2. `twine check`
 3. Attach `dist/*` as **GitHub Release** assets (`GITHUB_TOKEN`)
 
-`workflow_dispatch` is **build + check only** (no Release upload).
+`workflow_dispatch` is **build + check only** (no Release upload). Tags are for GitHub Release assets; **PyPI channel publish is branch-based** (below).
 
-### TestPyPI / PyPI (Trusted Publisher stub)
+### TestPyPI / PyPI (Trusted Publisher)
 
-[`.github/workflows/publish-pypi.yml`](.github/workflows/publish-pypi.yml) publishes with **OIDC** (`pypa/gh-action-pypi-publish`) — no `TWINE_PASSWORD` / API token secrets.
+[`.github/workflows/publish-pypi.yml`](.github/workflows/publish-pypi.yml) publishes with **OIDC** (`pypa/gh-action-pypi-publish`) — no `TWINE_PASSWORD` / API token secrets. Versions are computed by [`scripts/compute_pep440_version.py`](scripts/compute_pep440_version.py) (PEP 440; no `+local` segments).
 
-Human setup after org approval:
+| Branch | PEP 440 form | Index |
+|--------|--------------|-------|
+| Feature (anything except `main` / `release/*`) | `{base}.dev{N}` developmental | **TestPyPI only** |
+| Default `main` | `{base}rc{N}` release candidate | **TestPyPI only** |
+| `release/X.Y.Z` | final `X.Y.Z` only | **TestPyPI then PyPI** |
 
-1. Create a **Trusted Publisher** on TestPyPI and PyPI for project **`mcp-wizard-generators`** → this GitHub repo + `publish-pypi.yml`.
-2. Create GitHub Environments **`testpypi`** and **`pypi`** (optional required reviewers).
-3. Set repository variable **`ENABLE_PYPI_PUBLISH=true`** when tag pushes should publish (or use `workflow_dispatch` with target `testpypi` / `pypi` / `both`).
+- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.3.0`) for `.dev` / `rc` builds.
+- Feature `N` combines a crc32 band of the normalized branch name with `GITHUB_RUN_NUMBER` so re-publishes get a new developmental version.
+- `main` uses `N = GITHUB_RUN_NUMBER` → `{base}rc{N}`.
+- Final releases: cut a branch named **`release/X.Y.Z`**, with `pyproject.toml` and `src/mcp_wizard_generators/__init__.__version__` equal to that exact public version; quality must pass, then the workflow uploads to TestPyPI and PyPI.
+
+Triggers: push to any branch (skips `dependabot[bot]`) and `workflow_dispatch`. Quality must succeed before build/publish on every channel.
+
+Trusted Publisher is linked for project **`mcp-wizard-generators`** → this repo + `publish-pypi.yml`, with GitHub Environments **`testpypi`** and **`pypi`**. Optional emergency kill-switch: set repository variable **`ENABLE_PYPI_PUBLISH=false`** to skip publish jobs (unset / any other value allows publish).
 
 ## Non-goals (this repo)
 

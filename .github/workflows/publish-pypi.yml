@@ -1,15 +1,19 @@
-# OIDC Trusted Publisher stub for PyPI org agentic-ai-tools /
+# Branch-based OIDC Trusted Publisher publish for PyPI org agentic-ai-tools /
 # project mcp-wizard-generators.
 #
 # Does NOT run on PRs (PR CI stays free of publish credentials).
 # No long-lived PyPI API tokens — uses GitHub OIDC → PyPI Trusted Publisher.
 #
-# Human setup (after org approval):
-#   1. On TestPyPI and PyPI, create a Trusted Publisher for project
-#      `mcp-wizard-generators` pointing at this repo + this workflow.
-#   2. Create GitHub Environments `testpypi` and `pypi` (optional reviewers).
-#   3. Set repository variable ENABLE_PYPI_PUBLISH=true when ready to publish
-#      on version tags (workflow_dispatch always builds; publish steps gated).
+# Channels:
+#   feature branches → {base}.dev{N} → TestPyPI only
+#   main             → {base}rc{N}   → TestPyPI only
+#   release/X.Y.Z    → X.Y.Z         → TestPyPI then PyPI
+#
+# Quality (lint + test + Semgrep) must pass before build/publish on every channel.
+#
+# Optional emergency kill-switch: set repository variable ENABLE_PYPI_PUBLISH=false
+# to skip publish jobs (unset / any other value allows publish once Trusted Publisher
+# is linked). Environments: testpypi / pypi.
 #
 # Tag pushes still attach dist assets via publish-github-release.yml.
 
@@ -17,25 +21,79 @@ name: Publish to TestPyPI / PyPI
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - "**"
   workflow_dispatch:
-    inputs:
-      target:
-        description: "Index to publish to"
-        required: true
-        type: choice
-        options:
-          - testpypi
-          - pypi
-          - both
 
 permissions:
   contents: read
 
 jobs:
+  version:
+    name: Compute PEP 440 version
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      branch_kind: ${{ steps.compute.outputs.branch_kind }}
+      publish_pypi: ${{ steps.compute.outputs.publish_pypi }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging helpers
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "packaging>=24.0"
+
+      - name: Compute version
+        id: compute
+        run: |
+          set -eu
+          VERSION=$(python scripts/compute_pep440_version.py)
+          echo "$VERSION" > version.txt
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          REF="${GITHUB_REF_NAME}"
+          if [ "$REF" = "main" ]; then
+            KIND=main
+            PUBLISH_PYPI=false
+          elif [[ "$REF" == release/* ]]; then
+            KIND=release
+            PUBLISH_PYPI=true
+          else
+            KIND=feature
+            PUBLISH_PYPI=false
+          fi
+          echo "branch_kind=$KIND" >> "$GITHUB_OUTPUT"
+          echo "publish_pypi=$PUBLISH_PYPI" >> "$GITHUB_OUTPUT"
+          echo "Computed version=$VERSION kind=$KIND publish_pypi=$PUBLISH_PYPI"
+
+      - name: Upload version.txt
+        uses: actions/upload-artifact@v7
+        with:
+          name: pep440-version
+          path: version.txt
+
+  quality:
+    name: Quality
+    needs: version
+    if: github.actor != 'dependabot[bot]'
+    uses: ./.github/workflows/quality.yml
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
   build:
     name: Build dist
+    needs: [version, quality]
+    if: >
+      github.actor != 'dependabot[bot]' &&
+      needs.version.result == 'success' &&
+      needs.quality.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -46,13 +104,79 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: python -m pip install --upgrade pip build twine
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine "packaging>=24.0"
+
+      - name: Download version.txt
+        uses: actions/download-artifact@v8
+        with:
+          name: pep440-version
+          path: .
+
+      - name: Rewrite version into pyproject + __init__ (CI-only)
+        run: |
+          set -eu
+          VERSION=$(tr -d '[:space:]' < version.txt)
+          echo "Rewriting package version to $VERSION (workspace only, not pushed)"
+          python <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          version = Path("version.txt").read_text(encoding="utf-8").strip()
+          if not version:
+              sys.exit("empty version.txt")
+
+          pyproject = Path("pyproject.toml")
+          text = pyproject.read_text(encoding="utf-8")
+          new_text, n = re.subn(
+              r'(?m)^(version\s*=\s*)"[^"]*"',
+              rf'\1"{version}"',
+              text,
+              count=1,
+          )
+          if n != 1:
+              sys.exit(f"failed to rewrite pyproject version (replacements={n})")
+          pyproject.write_text(new_text, encoding="utf-8")
+
+          init = Path("src/mcp_wizard_generators/__init__.py")
+          init_text = init.read_text(encoding="utf-8")
+          new_init, n = re.subn(
+              r'(?m)^(__version__\s*=\s*)["\'][^"\']+["\']',
+              rf'\1"{version}"',
+              init_text,
+              count=1,
+          )
+          if n != 1:
+              sys.exit(f"failed to rewrite __version__ (replacements={n})")
+          init.write_text(new_init, encoding="utf-8")
+          print(f"rewrote metadata to {version}")
+          PY
 
       - name: Build wheel and sdist
         run: python -m build
 
       - name: Twine check
         run: python -m twine check dist/*
+
+      - name: Assert metadata version matches computed
+        run: |
+          set -eu
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+
+          expected = Path("version.txt").read_text(encoding="utf-8").strip()
+          wheels = list(Path("dist").glob("*.whl"))
+          sdists = list(Path("dist").glob("*.tar.gz"))
+          if not wheels or not sdists:
+              sys.exit(f"missing dist artifacts: {list(Path('dist').iterdir())}")
+          for path in wheels + sdists:
+              if expected not in path.name:
+                  sys.exit(f"artifact {path.name!r} missing version {expected!r}")
+          print(f"artifacts match version {expected}")
+          PY
 
       - name: Upload dist artifacts
         uses: actions/upload-artifact@v7
@@ -62,11 +186,13 @@ jobs:
 
   publish-testpypi:
     name: Publish to TestPyPI (OIDC)
-    needs: build
+    needs: [version, quality, build]
     if: >
-      (github.event_name == 'workflow_dispatch' &&
-        (github.event.inputs.target == 'testpypi' || github.event.inputs.target == 'both'))
-      || (github.event_name == 'push' && vars.ENABLE_PYPI_PUBLISH == 'true')
+      github.actor != 'dependabot[bot]' &&
+      vars.ENABLE_PYPI_PUBLISH != 'false' &&
+      needs.version.result == 'success' &&
+      needs.quality.result == 'success' &&
+      needs.build.result == 'success'
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -87,17 +213,15 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI (OIDC)
-    needs: [build, publish-testpypi]
-    # Allow pypi-only dispatch; on tags require testpypi job when publish enabled.
+    needs: [version, quality, build, publish-testpypi]
     if: >
-      always() && needs.build.result == 'success' &&
-      (
-        (github.event_name == 'workflow_dispatch' &&
-          (github.event.inputs.target == 'pypi' || github.event.inputs.target == 'both') &&
-          (github.event.inputs.target == 'pypi' || needs.publish-testpypi.result == 'success'))
-        || (github.event_name == 'push' && vars.ENABLE_PYPI_PUBLISH == 'true' &&
-            needs.publish-testpypi.result == 'success')
-      )
+      github.actor != 'dependabot[bot]' &&
+      vars.ENABLE_PYPI_PUBLISH != 'false' &&
+      needs.version.outputs.publish_pypi == 'true' &&
+      needs.version.result == 'success' &&
+      needs.quality.result == 'success' &&
+      needs.build.result == 'success' &&
+      needs.publish-testpypi.result == 'success'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
