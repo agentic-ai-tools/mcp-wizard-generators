@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from mcp_wizard_generators.models import IntermediateRep, SecurityConfig
+from mcp_wizard_generators.openapi import is_openapi_document, openapi_to_ir
 from mcp_wizard_generators.package_name import validate_package_name
 from mcp_wizard_generators.packaging import pack_file_tree_to_zip
 from mcp_wizard_generators.pipeline import GenerateResult, generate
@@ -106,6 +107,10 @@ def coerce_spec(
             data["operations"] = op_dicts
             selected_ids = [str(op["id"]) for op in op_dicts]
 
+    # API workers pass the fetched OpenAPI document; convert before IR from_dict.
+    if is_openapi_document(data):
+        return openapi_to_ir(data), selected_ids
+
     if not data.get("title"):
         data["title"] = "Generated API"
     return IntermediateRep.from_dict(data), selected_ids
@@ -127,12 +132,13 @@ def generate_python_mcp(
 
     Stable contract for ``mcp-wizard-api`` workers:
 
-    - ``spec``: IntermediateRep, IR JSON dict, or a minimal ``{title, servers, operations}``
+    - ``spec``: IntermediateRep, IR JSON dict, OpenAPI/Swagger document, or a minimal
+      ``{title, servers, operations}`` payload
     - ``operations``: selected operation ids **or** a list of simple operation dicts
       (``method``, ``path``, ``operationId``, ``summary``, ``params``).
       Explicit ``operations=[]`` raises ``ValueError`` (does **not** mean all).
       ``None`` / omit may mean all operations (CLI convenience). API should always
-      pass a non-empty id list.
+      pass a non-empty id list. Unknown ids raise ``ValueError``.
     - ``package_name``: validated snake_case identifier (see ``validate_package_name``)
     - ``out_dir``: write the project tree here (created if needed)
     - ``zip_path``: optional zip archive of the same tree
