@@ -1,13 +1,17 @@
-# Lint, test, coverage gate, and Codecov upload for mcp-wizard-generators.
+# Lint, test, coverage gate, Semgrep, and Codecov upload for mcp-wizard-generators.
 # Requires repo/org secret CODECOV_TOKEN (or Codecov GitHub App) for uploads
 # on private repos and for reliable main-branch uploads after going public.
 # PR CI does not require PyPI / Trusted Publisher secrets.
+#
+# Quality steps live in quality.yml (workflow_call) and are shared with publish-pypi.
 
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "release/**"
   pull_request:
   workflow_dispatch:
 
@@ -15,64 +19,9 @@ permissions:
   contents: read
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install package + dev tools
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
-      - name: Ruff format check
-        run: ruff format --check .
-
-      - name: Ruff lint
-        run: ruff check .
-
-  test:
-    name: Test (coverage)
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install package + dev tools
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
-      - name: Pytest with coverage
-        run: >
-          python -m pytest -m "not e2e"
-          --cov=mcp_wizard_generators
-          --cov-report=term-missing
-          --cov-report=xml:coverage.xml
-          --cov-report=lcov:coverage.lcov
-
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.xml,coverage.lcov
-          flags: unittests
-          name: mcp-wizard-generators
-          # Token may be unset until Codecov App / CODECOV_TOKEN is wired;
-          # local coverage --cov-fail-under still gates the job above.
-          fail_ci_if_error: false
+  quality:
+    name: Quality
+    uses: ./.github/workflows/quality.yml
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}

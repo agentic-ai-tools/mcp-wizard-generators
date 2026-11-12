@@ -45,6 +45,8 @@ dev = [
   # Wheel/sdist build + twine check (make dist / release workflow).
   "build>=1.2",
   "twine>=5.0",
+  # PEP 440 validation for scripts/compute_pep440_version.py.
+  "packaging>=24.0",
 ]
 
 [project.scripts]

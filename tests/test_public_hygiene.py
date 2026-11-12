@@ -14,6 +14,7 @@ CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 CODE_OF_CONDUCT = ROOT / "CODE_OF_CONDUCT.md"
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+QUALITY_WORKFLOW = ROOT / ".github" / "workflows" / "quality.yml"
 SEMGREP_WORKFLOW = ROOT / ".github" / "workflows" / "semgrep.yml"
 PUBLISH_PYPI_WORKFLOW = ROOT / ".github" / "workflows" / "publish-pypi.yml"
 CODECOV_YML = ROOT / "codecov.yml"
@@ -101,16 +102,22 @@ def test_dependabot_github_actions_and_pip() -> None:
 
 def test_ci_runs_lint_test_coverage_and_codecov() -> None:
     assert CI_WORKFLOW.is_file(), f"missing {CI_WORKFLOW}"
-    text = CI_WORKFLOW.read_text(encoding="utf-8")
-    assert "ruff format --check" in text or "make lint" in text or "ruff check" in text
-    assert "pytest" in text
-    assert "--cov" in text or "coverage" in text.lower()
-    assert "coverage.xml" in text or "lcov" in text.lower()
-    assert "codecov/codecov-action" in text
-    assert "CODECOV_TOKEN" in text
+    assert QUALITY_WORKFLOW.is_file(), f"missing {QUALITY_WORKFLOW}"
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+    quality = QUALITY_WORKFLOW.read_text(encoding="utf-8")
+    # CI delegates to reusable quality.yml (lint + test + Semgrep).
+    assert "quality.yml" in ci
+    assert "workflow_call" in quality
+    assert "ruff format --check" in quality or "make lint" in quality or "ruff check" in quality
+    assert "pytest" in quality
+    assert "--cov" in quality or "coverage" in quality.lower()
+    assert "coverage.xml" in quality or "lcov" in quality.lower()
+    assert "codecov/codecov-action" in quality
+    assert "CODECOV_TOKEN" in ci or "CODECOV_TOKEN" in quality
+    assert "release/**" in ci or "release/*" in ci
     # PR CI must not require PyPI tokens / Trusted Publisher secrets.
-    assert "PYPI_TOKEN" not in text
-    assert "TWINE_PASSWORD" not in text
+    assert "PYPI_TOKEN" not in ci and "PYPI_TOKEN" not in quality
+    assert "TWINE_PASSWORD" not in ci and "TWINE_PASSWORD" not in quality
 
 
 def test_coverage_floor_configured() -> None:
@@ -161,8 +168,9 @@ def test_trusted_publisher_stub_oidc_no_pr_secrets() -> None:
     # Must not use long-lived password tokens.
     assert "TWINE_PASSWORD" not in text
     assert "PYPI_API_TOKEN" not in text
-    # Not on pull_request (PR CI stays secret-free for publish).
-    assert "pull_request" not in text
+    # Triggers must not include PR events (PR CI stays secret-free for publish).
+    on_block = text.split("jobs:", 1)[0]
+    assert "pull_request" not in on_block
 
 
 def test_readme_public_install_and_badges() -> None:
