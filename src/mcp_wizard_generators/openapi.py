@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 
 from mcp_wizard_generators.models import IntermediateRep, IrOperation
 
@@ -19,30 +21,73 @@ def is_openapi_document(data: dict[str, Any]) -> bool:
     return ("openapi" in data or "swagger" in data) and isinstance(data.get("paths"), dict)
 
 
-def _server_urls(spec: dict[str, Any]) -> list[str]:
+_SERVER_VAR = re.compile(r"\{([^{}]+)\}")
+
+
+def _http_source(source_url: str | None) -> str | None:
+    """Return ``source_url`` only when it is an absolute http(s) URL."""
+    if not source_url:
+        return None
+    parts = urlsplit(source_url)
+    if parts.scheme.lower() in {"http", "https"} and parts.netloc:
+        return source_url
+    return None
+
+
+def _substitute_variables(url: str, variables: Any) -> str:
+    """Replace ``{name}`` with the server variable's ``default`` (OpenAPI 3)."""
+    if not isinstance(variables, dict):
+        return url
+
+    def repl(match: re.Match[str]) -> str:
+        var = variables.get(match.group(1))
+        if isinstance(var, dict) and var.get("default") is not None:
+            return str(var["default"])
+        return match.group(0)
+
+    return _SERVER_VAR.sub(repl, url)
+
+
+def _resolve(url: str, source: str | None) -> str:
+    """Resolve a relative server URL against the document's location."""
+    if source is None or urlsplit(url).scheme:
+        return url
+    return urljoin(source, url)
+
+
+def _server_urls(spec: dict[str, Any], source_url: str | None = None) -> list[str]:
+    source = _http_source(source_url)
     servers = spec.get("servers")
     if isinstance(servers, list):
         urls: list[str] = []
         for item in servers:
             if isinstance(item, str) and item:
-                urls.append(item)
+                urls.append(_resolve(item, source))
             elif isinstance(item, dict):
                 url = item.get("url")
                 if isinstance(url, str) and url:
-                    urls.append(url)
+                    url = _substitute_variables(url, item.get("variables"))
+                    urls.append(_resolve(url, source))
         if urls:
             return urls
     # Swagger 2 host/basePath fallback
+    base = spec.get("basePath") or ""
+    if not isinstance(base, str):
+        base = ""
     host = spec.get("host")
     if isinstance(host, str) and host:
         scheme = "https"
         schemes = spec.get("schemes")
         if isinstance(schemes, list) and schemes:
             scheme = str(schemes[0])
-        base = spec.get("basePath") or ""
-        if not isinstance(base, str):
-            base = ""
         return [f"{scheme}://{host}{base}"]
+    if source is not None:
+        if "swagger" in spec:
+            # Swagger 2: no host means the host (and scheme) serving the document.
+            parts = urlsplit(source)
+            return [f"{parts.scheme}://{parts.netloc}{base}"]
+        # OpenAPI 3: absent or empty servers means a single server at "/".
+        return [urljoin(source, "/")]
     return []
 
 
@@ -115,18 +160,22 @@ def _input_schema_for_operation(
     return schema
 
 
-def openapi_to_ir(spec: dict[str, Any]) -> IntermediateRep:
+def openapi_to_ir(spec: dict[str, Any], *, source_url: str | None = None) -> IntermediateRep:
     """
     Normalize an OpenAPI/Swagger document into IntermediateRep.
 
     Operation ``id`` matches mcp-wizard-api catalog ids: ``operationId`` when
     present, otherwise ``{method}:{path}``.
+
+    ``source_url`` is the http(s) URL the document was fetched from. Relative
+    server URLs (and a missing Swagger 2 ``host``) resolve against it, as the
+    OpenAPI spec defines. Without it, relative URLs are kept as written.
     """
     info = spec.get("info") if isinstance(spec.get("info"), dict) else {}
     title = str(info.get("title") or "Generated API")
     version = str(info.get("version") or "0.0.0")
     spec_version = str(spec.get("openapi") or spec.get("swagger") or "3.0")
-    servers = _server_urls(spec)
+    servers = _server_urls(spec, source_url)
 
     ops: list[IrOperation] = []
     paths = spec.get("paths") or {}

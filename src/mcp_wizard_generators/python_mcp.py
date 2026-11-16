@@ -71,9 +71,14 @@ def _operation_from_simple(op: dict[str, Any], index: int) -> dict[str, Any]:
 def coerce_spec(
     spec: IntermediateRep | dict[str, Any] | None,
     operations: Sequence[str] | Sequence[dict[str, Any]] | None = None,
+    *,
+    source_url: str | None = None,
 ) -> tuple[IntermediateRep, list[str] | None]:
     """
     Accept IR JSON **or** a simple operations payload.
+
+    ``source_url`` (the http(s) URL an OpenAPI document was fetched from) resolves
+    relative ``servers`` URLs; see ``openapi_to_ir``.
 
     Returns ``(ir, selected_operation_ids)``. When ``operations`` is a list of
     operation dicts, they become the IR operation set and selection is all of them
@@ -109,7 +114,7 @@ def coerce_spec(
 
     # API workers pass the fetched OpenAPI document; convert before IR from_dict.
     if is_openapi_document(data):
-        return openapi_to_ir(data), selected_ids
+        return openapi_to_ir(data, source_url=source_url), selected_ids
 
     if not data.get("title"):
         data["title"] = "Generated API"
@@ -146,6 +151,7 @@ def generate_python_mcp(
     tool_name_overrides: dict[str, str] | None = None,
     auth_mode: str = "none",
     security: SecurityConfig | Mapping[str, Any] | None = None,
+    source_url: str | None = None,
 ) -> Path:
     """
     Generate a locally runnable Python MCP server from OpenAPI-derived operations.
@@ -165,6 +171,9 @@ def generate_python_mcp(
     - ``security``: ``SecurityConfig`` or Experience API SecurityConfig JSON
       (``authMode`` none | api_key | oauth2). Honored in generated code; invalid
       settings raise ``ValueError`` before anything is written (ADR-017).
+    - ``source_url``: the http(s) URL the OpenAPI document was fetched from. Relative
+      ``servers`` URLs resolve against it so the generated ``API_BASE_URL`` is
+      absolute. Workers should always pass the import URL.
 
     Returns ``Path(out_dir)`` when ``out_dir`` is set; otherwise ``Path(zip_path)``.
     At least one of ``out_dir`` / ``zip_path`` is required.
@@ -178,7 +187,7 @@ def generate_python_mcp(
     package_name = validate_package_name(package_name)
     sec = coerce_security(security, auth_mode)
 
-    ir, selected = coerce_spec(spec, operations)
+    ir, selected = coerce_spec(spec, operations, source_url=source_url)
     result = generate(
         ir,
         target="local",
@@ -216,7 +225,7 @@ def generate_python_mcp_result(
     validated before generation.
     """
     _reject_empty_operations(operations)
-    ir, selected = coerce_spec(spec, operations)
+    ir, selected = coerce_spec(spec, operations, source_url=kwargs.pop("source_url", None))
     auth_mode = kwargs.pop("auth_mode", "none")
     security = coerce_security(kwargs.pop("security", None), auth_mode)
     package_name = validate_package_name(kwargs.pop("package_name", "generated_mcp"))

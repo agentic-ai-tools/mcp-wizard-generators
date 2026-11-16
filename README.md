@@ -70,9 +70,21 @@ out = generate_python_mcp(
     package_name="pets_tiny_mcp",  # validated: ^[a-z][a-z0-9_]{0,62}$
     # Experience API SecurityConfig JSON, or a SecurityConfig instance:
     security={"authMode": "api_key", "apiKey": {"location": "header", "name": "X-API-Key"}},
+    # URL the OpenAPI document was fetched from (resolves relative servers):
+    source_url="https://petstore3.swagger.io/api/v3/openapi.json",
 )
 # out → Path(out_dir) if out_dir set, else Path(zip_path)
 ```
+
+**`source_url` (0.4.1):** the http(s) URL the OpenAPI document was fetched from. Many specs
+declare a relative server such as `servers: [{url: "/api/v3"}]`, which OpenAPI defines as
+relative to the document's location. With `source_url` set, relative server URLs resolve
+against it (`/api/v3` → `https://petstore3.swagger.io/api/v3`), so the generated
+`API_BASE_URL` in `.env.example` and `.cursor/mcp.json` is absolute. Server `{variables}`
+use their `default` values; a missing `servers` array means the document's origin, and a
+Swagger 2 spec without `host` uses the document's host. Without `source_url` (for example an
+uploaded file), relative URLs are kept as written and you set `API_BASE_URL` yourself.
+Workers should always pass the import URL.
 
 **`security` (ADR-017):** pass the session's saved `SecurityConfig` JSON as-is. Every mode is
 honored in the generated `client.py`; invalid or unsupported settings raise `ValueError`
@@ -302,7 +314,7 @@ Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run
 | Default `main` | `{base}rc{N}` release candidate | **TestPyPI only** |
 | `release/X.Y.Z` | final `X.Y.Z` only | **TestPyPI then PyPI** |
 
-- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.4.0`) for `.dev` / `rc` builds.
+- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.4.1`) for `.dev` / `rc` builds.
 - Feature `N` combines a crc32 band of the normalized branch name with `GITHUB_RUN_NUMBER` so re-publishes get a new developmental version.
 - `main` uses `N = GITHUB_RUN_NUMBER` → `{base}rc{N}`.
 - Final releases: cut a branch named **`release/X.Y.Z`**, with `pyproject.toml` and `src/mcp_wizard_generators/__init__.__version__` equal to that exact public version; quality must pass, then the workflow uploads to TestPyPI and PyPI.
