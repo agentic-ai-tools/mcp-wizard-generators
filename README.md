@@ -17,7 +17,7 @@ This package is a **library + CLI**. It does **not** run HTTP servers or workers
 
 ## Community
 
-- **License:** [MIT](LICENSE)
+- **License:** [MIT](LICENSE) © 2026 Agentic AI Tools LLC
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Code of Conduct:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - **Security:** [SECURITY.md](SECURITY.md)
