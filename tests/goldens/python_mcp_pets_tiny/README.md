@@ -49,6 +49,11 @@ python -m pets_tiny_mcp
 Upstream API base URL defaults from the OpenAPI servers list
 (`https://petstore.example.com/v1`). Override with `API_BASE_URL`.
 
+## Authentication
+
+**No authentication.** Requests go to the upstream API without credentials.
+Use this only for development or public APIs.
+
 ## Verify
 
 Check that the server exposes the tools selected at generation time.

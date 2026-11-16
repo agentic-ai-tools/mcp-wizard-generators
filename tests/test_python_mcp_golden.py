@@ -7,6 +7,8 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from mcp_wizard_generators.models import IntermediateRep
 from mcp_wizard_generators.packaging import pack_file_tree_to_zip
 from mcp_wizard_generators.python_mcp import generate_python_mcp, generate_python_mcp_result
@@ -129,3 +131,43 @@ def test_generate_python_mcp_simple_operations(tmp_path: Path) -> None:
     assert (out / ".cursor/mcp.json").is_file()
     text = (out / "src/simple_pets_mcp/server.py").read_text(encoding="utf-8")
     assert "listpets" in text
+
+
+SECURITY_GOLDENS = {
+    "python_mcp_pets_tiny_api_key_query": {
+        "authMode": "api_key",
+        "apiKey": {"location": "query", "name": "api_key"},
+    },
+    "python_mcp_pets_tiny_oauth2": {
+        "authMode": "oauth2",
+        "oauth": {
+            "tokenUrl": "https://auth.example.com/oauth2/token",
+            "scopes": ["pets.read"],
+            "audience": "https://petstore.example.com",
+        },
+    },
+}
+
+
+@pytest.mark.parametrize("golden", sorted(SECURITY_GOLDENS))
+def test_python_mcp_security_goldens(golden: str) -> None:
+    """Lock generated auth code per mode (ADR-017); behavior is in test_python_mcp_security."""
+    ir = IntermediateRep.from_dict(json.loads(FIXTURE.read_text(encoding="utf-8")))
+    result = generate_python_mcp_result(
+        ir,
+        ["listPets", "showPetById"],
+        package_name="pets_tiny_mcp",
+        security=SECURITY_GOLDENS[golden],
+    )
+    golden_dir = ROOT / "goldens" / golden
+    expected_paths = sorted(
+        str(p.relative_to(golden_dir)).replace("\\", "/")
+        for p in golden_dir.rglob("*")
+        if p.is_file()
+    )
+    assert result.tree.paths() == expected_paths
+    for entry in result.tree.entries:
+        golden_file = golden_dir / entry.path
+        assert _normalize(entry.content) == _normalize(golden_file.read_text(encoding="utf-8")), (
+            f"content drift: {golden}/{entry.path}"
+        )

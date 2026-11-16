@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import os
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from mcp_wizard_generators.paths import normalize_tree_path
+
+AUTH_MODES = frozenset({"none", "api_key", "oauth2"})
+SECRETS_STRATEGIES = frozenset({"dotenv_example_only", "env", "secret_manager"})
+# RFC 9110 token characters: safe as an HTTP header name and as a query key.
+_API_KEY_NAME = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}")
 
 
 @dataclass(frozen=True)
@@ -129,11 +136,85 @@ class FileTree:
 
 @dataclass
 class SecurityConfig:
-    """Subset of session security options relevant to codegen."""
+    """Upstream-API auth the generated MCP server applies (design ADR-017).
+
+    ``from_wizard`` maps the Experience API ``SecurityConfig`` contract. Every
+    supported mode is honored in generated code; anything else raises
+    ``ValueError`` instead of silently downgrading to no auth. Secrets are
+    never stored here — generated code reads them from env at runtime.
+    """
 
     auth_mode: str = "none"
     secrets_strategy: str = "dotenv_example_only"
+    api_key_location: str = "header"
+    api_key_name: str = "X-API-Key"
+    oauth_token_url: str = ""
+    oauth_scopes: list[str] = field(default_factory=list)
+    oauth_audience: str = ""
     extras: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        if self.auth_mode not in AUTH_MODES:
+            raise ValueError(
+                f"Unsupported authMode {self.auth_mode!r}; expected one of {sorted(AUTH_MODES)}"
+            )
+        if self.secrets_strategy not in SECRETS_STRATEGIES:
+            raise ValueError(f"Unsupported secretsStrategy {self.secrets_strategy!r}")
+        if self.auth_mode == "api_key":
+            if self.api_key_location not in ("header", "query"):
+                raise ValueError("apiKey.location must be 'header' or 'query'")
+            if not _API_KEY_NAME.fullmatch(self.api_key_name or ""):
+                raise ValueError(
+                    f"apiKey.name {self.api_key_name!r} is not a valid header/query name"
+                )
+        if self.auth_mode == "oauth2":
+            if not self.oauth_token_url:
+                raise ValueError("oauth.tokenUrl is required for authMode=oauth2")
+            if not self.oauth_token_url.lower().startswith("https://"):
+                raise ValueError("oauth.tokenUrl must use https")
+
+    @classmethod
+    def from_wizard(cls, config: Mapping[str, Any]) -> SecurityConfig:
+        """Build from the Experience API ``SecurityConfig`` JSON (camelCase)."""
+        if config.get("mcpAuth"):
+            raise ValueError(
+                "mcpAuth is not supported: generated MCP servers are stdio-only in MVP-1"
+            )
+        auth_mode = str(config.get("authMode") or "none")
+        api_key = config.get("apiKey") or {}
+        oauth = config.get("oauth") or {}
+        if auth_mode == "api_key" and not api_key:
+            raise ValueError("apiKey (location, name) is required for authMode=api_key")
+        if auth_mode == "oauth2" and not oauth.get("tokenUrl"):
+            raise ValueError("oauth.tokenUrl is required for authMode=oauth2")
+        return cls(
+            auth_mode=auth_mode,
+            secrets_strategy=str(config.get("secretsStrategy") or "dotenv_example_only"),
+            api_key_location=str(api_key.get("location") or "header"),
+            api_key_name=str(api_key.get("name") or "X-API-Key"),
+            oauth_token_url=str(oauth.get("tokenUrl") or ""),
+            oauth_scopes=[str(s) for s in (oauth.get("scopes") or [])],
+            oauth_audience=str(oauth.get("audience") or ""),
+        )
+
+    def manifest(self) -> dict[str, Any]:
+        """Non-secret security summary for generation-manifest.json."""
+        data: dict[str, Any] = {
+            "authMode": self.auth_mode,
+            "secretsStrategy": self.secrets_strategy,
+        }
+        if self.auth_mode == "api_key":
+            data["apiKey"] = {"location": self.api_key_location, "name": self.api_key_name}
+        if self.auth_mode == "oauth2":
+            data["oauth"] = {
+                "tokenUrl": self.oauth_token_url,
+                "scopes": list(self.oauth_scopes),
+                "audience": self.oauth_audience,
+            }
+        return data
 
 
 @dataclass
