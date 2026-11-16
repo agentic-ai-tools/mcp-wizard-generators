@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "pets_tiny_mcp": {
+      "command": "python",
+      "args": [
+        "-m",
+        "pets_tiny_mcp"
+      ],
+      "env": {
+        "API_BASE_URL": "https://petstore.example.com/v1",
+        "OAUTH_TOKEN_URL": "https://auth.example.com/oauth2/token",
+        "OAUTH_CLIENT_ID": "${OAUTH_CLIENT_ID}",
+        "OAUTH_CLIENT_SECRET": "${OAUTH_CLIENT_SECRET}",
+        "OAUTH_SCOPES": "pets.read"
+      }
+    }
+  }
+}

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from textwrap import dedent, indent
+from textwrap import dedent
 
 from mcp_wizard_generators.models import FileEntry, FileTree, GenerateContext, ToolMapping
 
@@ -70,10 +70,7 @@ class PythonMcpPlugin:
                 }
                 for t in ctx.tool_map.tools
             ],
-            "security": {
-                "authMode": ctx.security.auth_mode,
-                "secretsStrategy": ctx.security.secrets_strategy,
-            },
+            "security": ctx.security.manifest(),
         }
 
     def _readme(self, ctx: GenerateContext) -> str:
@@ -140,6 +137,7 @@ class PythonMcpPlugin:
                 "Upstream API base URL defaults from the OpenAPI servers list",
                 f"(`{base}`). Override with `API_BASE_URL`.",
                 "",
+                *self._readme_auth(ctx),
                 "## Verify",
                 "",
                 "Check that the server exposes the tools selected at generation time.",
@@ -180,6 +178,33 @@ class PythonMcpPlugin:
             ]
         )
 
+    def _readme_auth(self, ctx: GenerateContext) -> list[str]:
+        sec = ctx.security
+        lines = ["## Authentication", ""]
+        if sec.auth_mode == "api_key":
+            where = "query parameter" if sec.api_key_location == "query" else "header"
+            lines += [
+                f"Every upstream request sends an API key as the `{sec.api_key_name}` {where}.",
+                "Set the key in `API_KEY` (never commit it). `API_KEY_LOCATION` and",
+                "`API_KEY_NAME` default to the values chosen in the wizard.",
+                "If `API_KEY` is missing, requests fail instead of going out unauthenticated.",
+            ]
+        elif sec.auth_mode == "oauth2":
+            lines += [
+                "Upstream requests use an OAuth2 **client credentials** access token.",
+                f"The server requests it from `{sec.oauth_token_url}` (`OAUTH_TOKEN_URL`)",
+                "with `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` (HTTP Basic), caches it,",
+                "refreshes it shortly before it expires, and retries once on `401`.",
+                "`OAUTH_SCOPES` (space-separated) and `OAUTH_AUDIENCE` are optional.",
+                "Missing credentials or a non-https token URL fail closed.",
+            ]
+        else:
+            lines += [
+                "**No authentication.** Requests go to the upstream API without credentials.",
+                "Use this only for development or public APIs.",
+            ]
+        return [*lines, ""]
+
     def _pyproject(self, pkg: str, ctx: GenerateContext) -> str:
         dist = pkg.replace("_", "-")
         return dedent(
@@ -216,22 +241,27 @@ class PythonMcpPlugin:
             f"API_BASE_URL={base}",
             "# Auth mode from wizard security config: " + ctx.security.auth_mode,
         ]
-        if ctx.security.auth_mode == "api_key":
+        sec = ctx.security
+        if sec.auth_mode == "api_key":
             lines.extend(
                 [
                     "API_KEY=replace-me",
-                    "API_KEY_HEADER=X-API-Key",
+                    f"API_KEY_LOCATION={sec.api_key_location}",
+                    f"API_KEY_NAME={sec.api_key_name}",
                 ]
             )
-        elif ctx.security.auth_mode == "oauth2":
+        elif sec.auth_mode == "oauth2":
             lines.extend(
                 [
-                    "OAUTH_TOKEN_URL=",
+                    f"OAUTH_TOKEN_URL={sec.oauth_token_url}",
                     "OAUTH_CLIENT_ID=",
                     "OAUTH_CLIENT_SECRET=",
-                    "OAUTH_SCOPES=",
+                    f"OAUTH_SCOPES={' '.join(sec.oauth_scopes)}",
+                    f"OAUTH_AUDIENCE={sec.oauth_audience}",
                 ]
             )
+        else:
+            lines.append("# No authentication (development only)")
         lines.append("MCP_TRANSPORT=stdio")
         return "\n".join(lines) + "\n"
 
@@ -239,9 +269,16 @@ class PythonMcpPlugin:
         base = ctx.ir.servers[0] if ctx.ir.servers else "https://api.example.com"
         server_key = re.sub(r"[^a-zA-Z0-9_-]+", "-", pkg).strip("-") or "generated-mcp"
         env: dict[str, str] = {"API_BASE_URL": base}
-        if ctx.security.auth_mode == "api_key":
+        sec = ctx.security
+        if sec.auth_mode == "api_key":
             env["API_KEY"] = "${API_KEY}"
-            env["API_KEY_HEADER"] = "X-API-Key"
+            env["API_KEY_LOCATION"] = sec.api_key_location
+            env["API_KEY_NAME"] = sec.api_key_name
+        elif sec.auth_mode == "oauth2":
+            env["OAUTH_TOKEN_URL"] = sec.oauth_token_url
+            env["OAUTH_CLIENT_ID"] = "${OAUTH_CLIENT_ID}"
+            env["OAUTH_CLIENT_SECRET"] = "${OAUTH_CLIENT_SECRET}"
+            env["OAUTH_SCOPES"] = " ".join(sec.oauth_scopes)
         config = {
             "mcpServers": {
                 server_key: {
@@ -458,78 +495,136 @@ class PythonMcpPlugin:
         )
 
     def _http_client(self, ctx: GenerateContext) -> str:
-        auth_block = self._auth_header_block(ctx.security.auth_mode)
-        return dedent(
+        sec = ctx.security
+        header = dedent(
             f'''\
             """HTTP client for the upstream OpenAPI base URL.
 
-            Auth mode: {ctx.security.auth_mode}
-            Secrets strategy: {ctx.security.secrets_strategy}
+            Auth mode: {sec.auth_mode}
+            Secrets strategy: {sec.secrets_strategy}
+            Secrets are read from the environment at runtime; none are stored here.
             """
 
             from __future__ import annotations
 
             import os
+            import time
             from typing import Any
 
             import httpx
 
-
-            def _headers() -> dict[str, str]:
-                headers: dict[str, str] = {{"Accept": "application/json"}}
-            {auth_block}
-                return headers
-
-
-            def request(
-                method: str,
-                path: str,
-                *,
-                params: dict[str, Any] | None = None,
-                json_body: dict[str, Any] | None = None,
-            ) -> Any:
-                base = os.environ.get("API_BASE_URL", "").rstrip("/")
-                if not base:
-                    raise RuntimeError("API_BASE_URL is not set")
-                url = f"{{base}}{{path}}"
-                with httpx.Client(headers=_headers(), timeout=30.0) as client:
-                    response = client.request(method.upper(), url, params=params, json=json_body)
-                    response.raise_for_status()
-                    if response.status_code == 204 or not response.content:
-                        return {{"status": response.status_code}}
-                    content_type = response.headers.get("content-type", "")
-                    if "application/json" in content_type:
-                        return response.json()
-                    return {{"text": response.text, "status": response.status_code}}
+            AUTH_MODE = {json.dumps(sec.auth_mode)}
             '''
         )
+        if sec.auth_mode != "oauth2":
+            header = header.replace("import time\n", "", 1)  # only the token cache needs it
+        return "\n".join([header, self._auth_block(ctx), _CLIENT_REQUEST])
 
-    def _auth_header_block(self, auth_mode: str) -> str:
-        if auth_mode == "api_key":
-            return indent(
-                dedent(
-                    """\
+    def _auth_block(self, ctx: GenerateContext) -> str:
+        sec = ctx.security
+        if sec.auth_mode == "api_key":
+            return dedent(
+                f'''\
+                API_KEY_LOCATION_DEFAULT = {json.dumps(sec.api_key_location)}
+                API_KEY_NAME_DEFAULT = {json.dumps(sec.api_key_name)}
+
+
+                def _apply_auth(headers: dict[str, str], params: dict[str, Any]) -> None:
+                    """Send API_KEY as a header or query parameter; fail closed when unset."""
                     api_key = os.environ.get("API_KEY")
-                    if api_key:
-                        header_name = os.environ.get("API_KEY_HEADER", "X-API-Key")
-                        headers[header_name] = api_key
-                    """
-                ),
-                "    ",
-            ).rstrip()
-        if auth_mode == "oauth2":
-            return indent(
-                dedent(
-                    """\
-                    # Expect a pre-fetched bearer token in API_TOKEN for local use.
-                    token = os.environ.get("API_TOKEN") or os.environ.get("OAUTH_ACCESS_TOKEN")
-                    if token:
-                        headers["Authorization"] = f"Bearer {token}"
-                    """
-                ),
-                "    ",
-            ).rstrip()
-        return "    # authMode=none — no credential headers"
+                    if not api_key:
+                        raise RuntimeError("API_KEY is not set (authMode=api_key)")
+                    location = os.environ.get("API_KEY_LOCATION", API_KEY_LOCATION_DEFAULT)
+                    name = os.environ.get("API_KEY_NAME", API_KEY_NAME_DEFAULT)
+                    if location == "query":
+                        params[name] = api_key
+                    elif location == "header":
+                        headers[name] = api_key
+                    else:
+                        raise RuntimeError("API_KEY_LOCATION must be 'header' or 'query'")
+
+
+                def _invalidate_auth() -> bool:
+                    return False
+                '''
+            )
+        if sec.auth_mode == "oauth2":
+            return dedent(
+                f'''\
+                OAUTH_TOKEN_URL_DEFAULT = {json.dumps(sec.oauth_token_url)}
+                OAUTH_SCOPES_DEFAULT = {json.dumps(" ".join(sec.oauth_scopes))}
+                OAUTH_AUDIENCE_DEFAULT = {json.dumps(sec.oauth_audience)}
+                # Refresh this many seconds before the token expires.
+                _REFRESH_MARGIN_SECONDS = 60.0
+                _token: dict[str, Any] = {{"value": None, "expires_at": 0.0}}
+
+
+                def _required_env(name: str) -> str:
+                    value = os.environ.get(name)
+                    if not value:
+                        raise RuntimeError(f"{{name}} is not set (authMode=oauth2)")
+                    return value
+
+
+                def _fetch_token() -> str:
+                    """OAuth2 client credentials grant (RFC 6749 section 4.4), HTTP Basic auth."""
+                    token_url = os.environ.get("OAUTH_TOKEN_URL") or OAUTH_TOKEN_URL_DEFAULT
+                    if not token_url.lower().startswith("https://"):
+                        raise RuntimeError("OAUTH_TOKEN_URL must use https")
+                    client_id = _required_env("OAUTH_CLIENT_ID")
+                    client_secret = _required_env("OAUTH_CLIENT_SECRET")
+                    data = {{"grant_type": "client_credentials"}}
+                    scopes = os.environ.get("OAUTH_SCOPES", OAUTH_SCOPES_DEFAULT).strip()
+                    if scopes:
+                        data["scope"] = scopes
+                    audience = os.environ.get("OAUTH_AUDIENCE", OAUTH_AUDIENCE_DEFAULT).strip()
+                    if audience:
+                        data["audience"] = audience
+                    with httpx.Client(timeout=30.0) as client:
+                        response = client.post(
+                            token_url,
+                            data=data,
+                            auth=(client_id, client_secret),
+                            headers={{"Accept": "application/json"}},
+                        )
+                    response.raise_for_status()
+                    payload = response.json()
+                    access_token = payload.get("access_token")
+                    if not access_token:
+                        raise RuntimeError("OAuth2 token response has no access_token")
+                    expires_in = float(payload.get("expires_in") or 300)
+                    _token["value"] = access_token
+                    _token["expires_at"] = time.monotonic() + expires_in - _REFRESH_MARGIN_SECONDS
+                    return str(access_token)
+
+
+                def _access_token() -> str:
+                    if _token["value"] and time.monotonic() < _token["expires_at"]:
+                        return str(_token["value"])
+                    return _fetch_token()
+
+
+                def _apply_auth(headers: dict[str, str], params: dict[str, Any]) -> None:
+                    headers["Authorization"] = f"Bearer {{_access_token()}}"
+
+
+                def _invalidate_auth() -> bool:
+                    """Drop the cached token so the next request fetches a new one."""
+                    _token["value"] = None
+                    _token["expires_at"] = 0.0
+                    return True
+                '''
+            )
+        return dedent(
+            '''\
+            def _apply_auth(headers: dict[str, str], params: dict[str, Any]) -> None:
+                """authMode=none: no credentials (development or public APIs only)."""
+
+
+            def _invalidate_auth() -> bool:
+                return False
+            '''
+        )
 
     def _server(self, pkg: str, ctx: GenerateContext, tools: list[ToolMapping]) -> str:
         tool_fns = "\n\n\n".join(self._tool_function(t) for t in tools) or (
@@ -632,3 +727,51 @@ class PythonMcpPlugin:
             f'    """{doc}"""\n'
             f"{body}"
         )
+
+
+_CLIENT_REQUEST = dedent(
+    """\
+
+    def _send(
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        params: dict[str, Any],
+        json_body: dict[str, Any] | None,
+    ) -> httpx.Response:
+        with httpx.Client(timeout=30.0) as client:
+            return client.request(
+                method.upper(), url, headers=headers, params=params or None, json=json_body
+            )
+
+
+    def request(
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+    ) -> Any:
+        base = os.environ.get("API_BASE_URL", "").rstrip("/")
+        if not base:
+            raise RuntimeError("API_BASE_URL is not set")
+        url = f"{base}{path}"
+        headers: dict[str, str] = {"Accept": "application/json"}
+        query: dict[str, Any] = dict(params or {})
+        _apply_auth(headers, query)
+        response = _send(method, url, headers, query, json_body)
+        if response.status_code == 401 and _invalidate_auth():
+            # Token may have been revoked or expired early: refresh once and retry.
+            headers = {"Accept": "application/json"}
+            query = dict(params or {})
+            _apply_auth(headers, query)
+            response = _send(method, url, headers, query, json_body)
+        response.raise_for_status()
+        if response.status_code == 204 or not response.content:
+            return {"status": response.status_code}
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type:
+            return response.json()
+        return {"text": response.text, "status": response.status_code}
+    """
+)

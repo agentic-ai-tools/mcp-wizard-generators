@@ -170,5 +170,5 @@ def test_cli_prints_single_line_version(
     rc = compute.main(["--repo-root", str(ROOT)])
     assert rc == 0
     out = capsys.readouterr().out.strip()
-    assert out == "0.3.0rc9"
+    assert out == "0.4.0rc9"
     assert "\n" not in out

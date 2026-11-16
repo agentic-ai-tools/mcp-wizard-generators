@@ -68,10 +68,25 @@ out = generate_python_mcp(
     out_dir=workdir / "pets-mcp",
     zip_path=workdir / "pets-mcp.zip",  # optional
     package_name="pets_tiny_mcp",  # validated: ^[a-z][a-z0-9_]{0,62}$
-    auth_mode="none",  # none | api_key | oauth2
+    # Experience API SecurityConfig JSON, or a SecurityConfig instance:
+    security={"authMode": "api_key", "apiKey": {"location": "header", "name": "X-API-Key"}},
 )
 # out → Path(out_dir) if out_dir set, else Path(zip_path)
 ```
+
+**`security` (ADR-017):** pass the session's saved `SecurityConfig` JSON as-is. Every mode is
+honored in the generated `client.py`; invalid or unsupported settings raise `ValueError`
+**before** anything is written (never a silent downgrade to no auth).
+
+| `authMode` | Required fields | Generated behavior |
+|------------|-----------------|--------------------|
+| `none` | — | No credentials (dev / public APIs only) |
+| `api_key` | `apiKey.location` (`header` \| `query`), `apiKey.name` | Sends env `API_KEY` as that header or query param; fails if unset |
+| `oauth2` | `oauth.tokenUrl` (https); optional `scopes`, `audience` | Client credentials grant with env `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` (HTTP Basic); caches the token, refreshes before expiry, retries once on 401; fails if credentials are unset |
+
+`mcpAuth: true` and `mtls` are rejected: generated servers are stdio-only in MVP-1.
+The CLI takes the same JSON via `--security path/to/security.json`.
+The legacy `auth_mode="none"` keyword still works for the `none` mode.
 
 **`package_name`:** must match `^[a-z][a-z0-9_]{0,62}$`. Python keywords and a small denylist
 (`os`, `sys`, `mcp`, …) are rejected. Invalid names raise **before** any tree/zip is written.
@@ -184,10 +199,10 @@ Console script (after install): `mcp-wizard-gen …` (Windows: `.venv\Scripts\mc
 |------|---------|
 | `pyproject.toml` / `requirements.txt` | `mcp` + `httpx` deps |
 | `README.md` | SDK choice, run + Cursor setup |
-| `.env.example` | `API_BASE_URL` (+ auth placeholders) |
+| `.env.example` | `API_BASE_URL` + auth env vars for the chosen mode (placeholders only, never secrets) |
 | `.cursor/mcp.json` | Cursor MCP snippet (`command`/`args`/`env`) |
 | `src/<pkg>/server.py` | FastMCP/MCPServer tools (1:1 with ops) |
-| `src/<pkg>/client.py` | httpx → upstream API |
+| `src/<pkg>/client.py` | httpx → upstream API, applying the configured auth (API key / OAuth2 client credentials) |
 | `src/<pkg>/__main__.py` | `python -m <pkg>` stdio entry |
 | `src/<pkg>/verify.py` | `python -m <pkg>.verify` — tool count and metadata (`<dist>-verify` after install) |
 | `generation-manifest.json` | tools + generator metadata |
@@ -287,7 +302,7 @@ Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run
 | Default `main` | `{base}rc{N}` release candidate | **TestPyPI only** |
 | `release/X.Y.Z` | final `X.Y.Z` only | **TestPyPI then PyPI** |
 
-- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.3.0`) for `.dev` / `rc` builds.
+- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.4.0`) for `.dev` / `rc` builds.
 - Feature `N` combines a crc32 band of the normalized branch name with `GITHUB_RUN_NUMBER` so re-publishes get a new developmental version.
 - `main` uses `N = GITHUB_RUN_NUMBER` → `{base}rc{N}`.
 - Final releases: cut a branch named **`release/X.Y.Z`**, with `pyproject.toml` and `src/mcp_wizard_generators/__init__.__version__` equal to that exact public version; quality must pass, then the workflow uploads to TestPyPI and PyPI.

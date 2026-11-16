@@ -7,7 +7,12 @@ import json
 import sys
 from pathlib import Path
 
-from mcp_wizard_generators.models import AgentRulesBundle, IntermediateRep, SecurityConfig
+from mcp_wizard_generators.models import (
+    AUTH_MODES,
+    AgentRulesBundle,
+    IntermediateRep,
+    SecurityConfig,
+)
 from mcp_wizard_generators.packaging import pack_file_tree_to_zip
 from mcp_wizard_generators.paths import resolve_user_path
 from mcp_wizard_generators.pipeline import generate
@@ -48,7 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--out-dir", type=_path_type, help="Write file tree to this directory")
     gen.add_argument("--zip", type=_path_type, help="Write zip archive to this path")
     gen.add_argument("--manifest", type=_path_type, help="Write generation manifest JSON")
-    gen.add_argument("--auth-mode", default="none")
+    gen.add_argument("--auth-mode", default="none", choices=sorted(AUTH_MODES))
+    gen.add_argument(
+        "--security",
+        type=_path_type,
+        help="Experience API SecurityConfig JSON (authMode, apiKey, oauth); overrides --auth-mode",
+    )
     gen.add_argument(
         "--rules-dir", type=_path_type, help="Optional directory of Agent Rules originals"
     )
@@ -82,7 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
     py.add_argument("--package-name", default="generated_mcp")
     py.add_argument("--out-dir", type=_path_type, help="Write file tree to this directory")
     py.add_argument("--zip", type=_path_type, help="Write zip archive to this path")
-    py.add_argument("--auth-mode", default="none")
+    py.add_argument("--auth-mode", default="none", choices=sorted(AUTH_MODES))
+    py.add_argument(
+        "--security",
+        type=_path_type,
+        help="Experience API SecurityConfig JSON (authMode, apiKey, oauth); overrides --auth-mode",
+    )
     py.set_defaults(func=cmd_generate_python)
     return p
 
@@ -104,6 +119,15 @@ def _load_rules(args: argparse.Namespace) -> AgentRulesBundle:
     return AgentRulesBundle(format_family=args.rules_family, originals=originals)
 
 
+def _security(args: argparse.Namespace) -> SecurityConfig:
+    try:
+        if args.security:
+            return SecurityConfig.from_wizard(_load_json(args.security))
+        return SecurityConfig(auth_mode=args.auth_mode)
+    except ValueError as exc:
+        raise SystemExit(f"invalid security config: {exc}") from exc
+
+
 def cmd_generate(args: argparse.Namespace) -> int:
     ir = IntermediateRep.from_dict(_load_json(args.ir))
     result = generate(
@@ -111,7 +135,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         target=args.target,
         language=args.language,
         selected_operation_ids=args.select,
-        security=SecurityConfig(auth_mode=args.auth_mode),
+        security=_security(args),
         agent_rules=_load_rules(args),
         package_name=args.package_name,
         fail_on_rules_errors=False if args.target == "local" else True,
@@ -150,7 +174,7 @@ def cmd_generate_python(args: argparse.Namespace) -> int:
         out_dir=args.out_dir,
         zip_path=args.zip,
         package_name=args.package_name,
-        auth_mode=args.auth_mode,
+        security=_security(args),
     )
     # Pathlib str() is OS-native; fine for humans and shell copy-paste.
     print(path)

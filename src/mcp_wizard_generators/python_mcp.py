@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +116,26 @@ def coerce_spec(
     return IntermediateRep.from_dict(data), selected_ids
 
 
+def coerce_security(
+    security: SecurityConfig | Mapping[str, Any] | None, auth_mode: str = "none"
+) -> SecurityConfig:
+    """Return a validated SecurityConfig.
+
+    Accepts a ``SecurityConfig``, the Experience API ``SecurityConfig`` JSON
+    (``{"authMode": ..., "apiKey": ..., "oauth": ...}``), or ``None`` with the
+    legacy ``auth_mode`` string. Invalid or unsupported settings raise
+    ``ValueError`` (never a silent downgrade to no auth).
+    """
+    if security is None:
+        return SecurityConfig(auth_mode=auth_mode)
+    if isinstance(security, SecurityConfig):
+        security.validate()
+        return security
+    if isinstance(security, Mapping):
+        return SecurityConfig.from_wizard(security)
+    raise TypeError(f"security must be SecurityConfig or mapping, not {type(security).__name__}")
+
+
 def generate_python_mcp(
     spec: IntermediateRep | dict[str, Any] | None,
     operations: Sequence[str] | Sequence[dict[str, Any]] | None = None,
@@ -125,7 +145,7 @@ def generate_python_mcp(
     package_name: str = "generated_mcp",
     tool_name_overrides: dict[str, str] | None = None,
     auth_mode: str = "none",
-    security: SecurityConfig | None = None,
+    security: SecurityConfig | Mapping[str, Any] | None = None,
 ) -> Path:
     """
     Generate a locally runnable Python MCP server from OpenAPI-derived operations.
@@ -142,6 +162,9 @@ def generate_python_mcp(
     - ``package_name``: validated snake_case identifier (see ``validate_package_name``)
     - ``out_dir``: write the project tree here (created if needed)
     - ``zip_path``: optional zip archive of the same tree
+    - ``security``: ``SecurityConfig`` or Experience API SecurityConfig JSON
+      (``authMode`` none | api_key | oauth2). Honored in generated code; invalid
+      settings raise ``ValueError`` before anything is written (ADR-017).
 
     Returns ``Path(out_dir)`` when ``out_dir`` is set; otherwise ``Path(zip_path)``.
     At least one of ``out_dir`` / ``zip_path`` is required.
@@ -153,9 +176,9 @@ def generate_python_mcp(
 
     _reject_empty_operations(operations)
     package_name = validate_package_name(package_name)
+    sec = coerce_security(security, auth_mode)
 
     ir, selected = coerce_spec(spec, operations)
-    sec = security or SecurityConfig(auth_mode=auth_mode)
     result = generate(
         ir,
         target="local",
@@ -195,7 +218,7 @@ def generate_python_mcp_result(
     _reject_empty_operations(operations)
     ir, selected = coerce_spec(spec, operations)
     auth_mode = kwargs.pop("auth_mode", "none")
-    security = kwargs.pop("security", None) or SecurityConfig(auth_mode=auth_mode)
+    security = coerce_security(kwargs.pop("security", None), auth_mode)
     package_name = validate_package_name(kwargs.pop("package_name", "generated_mcp"))
     tool_name_overrides = kwargs.pop("tool_name_overrides", None)
     if kwargs:
