@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 from mcp_wizard_generators.models import FileTree
-from mcp_wizard_generators.paths import normalize_tree_path
+from mcp_wizard_generators.paths import normalize_tree_path, safe_tree_path
 
 
 def pack_file_tree_to_zip(tree: FileTree, dest: str | Path | None = None) -> bytes:
@@ -19,10 +19,10 @@ def pack_file_tree_to_zip(tree: FileTree, dest: str | Path | None = None) -> byt
     Zip member names always use forward slashes (portable across Windows/macOS).
     """
     buf = io.BytesIO()
-    prefix = normalize_tree_path(tree.root_name).rstrip("/") + "/"
+    prefix = safe_tree_path(tree.root_name).rstrip("/") + "/"
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         for entry in sorted(tree.entries, key=lambda e: normalize_tree_path(e.path)):
-            arcname = prefix + normalize_tree_path(entry.path)
+            arcname = prefix + safe_tree_path(entry.path)
             info = zipfile.ZipInfo(arcname)
             if entry.executable:
                 info.external_attr = (0o755 & 0xFFFF) << 16

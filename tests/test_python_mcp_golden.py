@@ -67,7 +67,8 @@ def test_python_mcp_pets_tiny_golden() -> None:
     assert "from mcp.server.mcpserver import MCPServer" in server.content
     assert '@mcp.tool(name="listpets"' in server.content
     assert '@mcp.tool(name="showpetbyid"' in server.content
-    assert "path_template.format(petId=petId)" in server.content
+    # Path arguments are URL-encoded so a value like "../admin" can't change the route.
+    assert 'path_template.format(petId=quote(str(petId), safe=""))' in server.content
 
     cursor = result.tree.get(".cursor/mcp.json")
     assert cursor is not None

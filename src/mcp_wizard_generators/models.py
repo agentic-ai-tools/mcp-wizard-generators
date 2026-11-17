@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from mcp_wizard_generators.paths import normalize_tree_path
+from mcp_wizard_generators.paths import safe_tree_path
 
 AUTH_MODES = frozenset({"none", "api_key", "oauth2"})
 SECRETS_STRATEGIES = frozenset({"dotenv_example_only", "env", "secret_manager"})
@@ -99,6 +99,10 @@ class FileEntry:
     content: str
     executable: bool = False
 
+    def __post_init__(self) -> None:
+        # Paths can come from user input (agent rules); refuse escapes up front.
+        safe_tree_path(self.path)
+
 
 @dataclass
 class FileTree:
@@ -120,7 +124,7 @@ class FileTree:
         root = Path(dest_dir)
         root.mkdir(parents=True, exist_ok=True)
         for entry in self.entries:
-            rel = normalize_tree_path(entry.path)
+            rel = safe_tree_path(entry.path)
             # Join POSIX segments so Windows hosts never treat "a/b" as one name.
             target = root.joinpath(*PurePosixPath(rel).parts) if rel else root
             target.parent.mkdir(parents=True, exist_ok=True)

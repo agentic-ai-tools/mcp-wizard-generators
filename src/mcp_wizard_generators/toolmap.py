@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from mcp_wizard_generators.codegen import HTTP_METHODS
 from mcp_wizard_generators.models import IntermediateRep, ToolMap, ToolMapping
 
 
@@ -15,6 +16,15 @@ def _slug_tool_name(operation_id: str | None, method: str, path: str) -> str:
     if slug[0].isdigit():
         slug = f"op_{slug}"
     return slug
+
+
+_TOOL_SLUG = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def _validate_override(name: str) -> str:
+    if not isinstance(name, str) or not _TOOL_SLUG.fullmatch(name):
+        raise ValueError(f"tool name override {name!r} must match {_TOOL_SLUG.pattern}")
+    return name
 
 
 def _unique_tool_name(name: str, seen: set[str]) -> str:
@@ -50,8 +60,13 @@ def build_tool_map(
     for op in ir.operations:
         if selected is not None and op.id not in selected:
             continue
+        if op.method not in HTTP_METHODS:
+            raise ValueError(f"unsupported HTTP method {op.method!r} for operation {op.id!r}")
+        override = overrides.get(op.id)
         tool_name = _unique_tool_name(
-            overrides.get(op.id) or _slug_tool_name(op.operation_id, op.method, op.path),
+            _validate_override(override)
+            if override
+            else _slug_tool_name(op.operation_id, op.method, op.path),
             seen_names,
         )
         description = op.summary or op.description or f"{op.method.upper()} {op.path}"
