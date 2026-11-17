@@ -49,7 +49,7 @@ def test_mit_license_file_present() -> None:
     assert LICENSE.is_file(), "LICENSE required for a public repo"
     text = LICENSE.read_text(encoding="utf-8")
     assert "MIT License" in text
-    assert "Copyright (c) 2026 agentic-ai-tools" in text
+    assert "Copyright (c) 2026 Agentic AI Tools LLC" in text
     assert "Apache" not in text
     license_field = _load_pyproject()["project"]["license"]
     if isinstance(license_field, dict):
