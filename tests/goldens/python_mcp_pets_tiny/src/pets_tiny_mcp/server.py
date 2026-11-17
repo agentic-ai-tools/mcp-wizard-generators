@@ -7,6 +7,7 @@ https://py.sdk.modelcontextprotocol.io/v2/migration/#fastmcp-renamed-to-mcpserve
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from pets_tiny_mcp.client import request
 
@@ -31,7 +32,7 @@ def listpets(limit: int | None = None) -> Any:
 def showpetbyid(petId: str) -> Any:
     """Info for a specific pet"""
     path_template = "/pets/{petId}"
-    path = path_template.format(petId=petId)
+    path = path_template.format(petId=quote(str(petId), safe=""))
     return request("GET", path)
 
 
