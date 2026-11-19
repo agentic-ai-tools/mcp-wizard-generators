@@ -1,8 +1,7 @@
 """Emit a locally runnable Python MCP server from selected OpenAPI operations.
 
 Uses the official MCP Python SDK high-level server API: MCPServer on mcp 2.x
-(`from mcp.server.mcpserver import MCPServer`). Generated code may include a
-small FastMCP fallback for mcp 1.x, but fresh zips pin mcp>=2,<3.
+(`from mcp.server.mcpserver import MCPServer`); generated projects pin mcp>=2,<3.
 """
 
 from __future__ import annotations
@@ -22,13 +21,25 @@ from mcp_wizard_generators.codegen import (
 from mcp_wizard_generators.findings import Finding, analyze_operation, visible
 from mcp_wizard_generators.models import FileEntry, FileTree, GenerateContext, ToolMapping
 from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
+from mcp_wizard_generators.plugins.python_mcp import client_template
 from mcp_wizard_generators.plugins.python_mcp.annotations import annotation as _annotation
 
 # Names a generated tool function or parameter must not take: module globals the
 # server uses, locals in each tool body, and builtins used in annotations.
 _TYPING_NAMES = ("Any", "Annotated", "Literal", "Field", "JsonValue", "re")
 _RESERVED_MODULE_NAMES = frozenset(
-    {"mcp", "request", "main", "quote", "annotations", "_MCP", *_TYPING_NAMES}
+    {
+        "mcp",
+        "request",
+        "main",
+        "quote",
+        "annotations",
+        "sys",
+        "MCPServer",
+        "check_config",
+        "ConfigError",
+        *_TYPING_NAMES,
+    }
 )
 _RESERVED_PARAM_NAMES = frozenset(
     {
@@ -40,6 +51,8 @@ _RESERVED_PARAM_NAMES = frozenset(
         "cookies",
         "request",
         "quote",
+        "secrets",
+        "sys",
         "mcp",
         *_TYPING_NAMES,
         "str",
@@ -117,7 +130,7 @@ class PythonMcpPlugin:
             "",
             "The wizard found these risks in the operations and settings you chose.",
             "They come from the upstream API's design: the generated server sends each value",
-            "where the API expects it.",
+            "where the API expects it, and keeps secrets out of its own error messages.",
             "",
         ]
         if tool_findings:
@@ -238,6 +251,17 @@ class PythonMcpPlugin:
                 "",
                 *self._readme_auth(ctx),
                 *self._readme_security(ctx),
+                "## Errors and limits",
+                "",
+                "- `API_BASE_URL` must be an `http` or `https` URL with a host and no user name,",
+                "  password, query string or fragment. The server checks it, and the",
+                "  authentication settings, at startup and exits with a clear message.",
+                "- Failed calls return a short, actionable error (HTTP status, what to check, and",
+                "  the API's own message). API keys, OAuth secrets and tokens, and secret",
+                "  arguments such as passwords are replaced with `***`.",
+                "- Responses larger than `MAX_RESPONSE_BYTES` (default 1048576, measured after",
+                "  decompression) are refused. Redirects are not followed.",
+                "",
                 "## Verify",
                 "",
                 "Check that the server exposes the tools selected at generation time.",
@@ -375,6 +399,8 @@ class PythonMcpPlugin:
             )
         else:
             lines.append("# No authentication (development only)")
+        lines.append("# Largest response body the server reads (bytes):")
+        lines.append("# MAX_RESPONSE_BYTES=1048576")
         lines.append("MCP_TRANSPORT=stdio")
         return "\n".join(lines) + "\n"
 
@@ -577,12 +603,32 @@ class PythonMcpPlugin:
                     sys.stdout.write(text)
 
 
+                _INSTALL = "Install the project first: pip install -r requirements.txt (or pip install -e .)"
+                _REGENERATE = "server.py was changed; undo the change or regenerate the project in the wizard"
+
+
+                def _fail(error: str, hint: str) -> int:
+                    _write_json({"ok": False, "error": error, "hint": hint, "toolCount": 0})
+                    return 1
+
+
                 def main() -> int:
                     try:
                         report = build_report()
-                    except Exception as exc:
-                        _write_json({"ok": False, "error": str(exc), "toolCount": 0})
-                        return 1
+                    except ModuleNotFoundError as exc:
+                        name = exc.name or "a module"
+                        if name == "mcp" or name.startswith("mcp."):
+                            hint = "This server needs mcp 2.x: pip install 'mcp>=2.0.0,<3'"
+                        else:
+                            hint = _INSTALL
+                        return _fail(f"cannot import {name}", hint)
+                    except ImportError as exc:
+                        return _fail(f"import failed: {exc}", _INSTALL)
+                    except SyntaxError as exc:
+                        where = Path(exc.filename or "server.py").name
+                        return _fail(f"{where} line {exc.lineno}: {exc.msg}", _REGENERATE)
+                    except (TypeError, ValueError) as exc:
+                        return _fail(f"a tool definition is invalid: {exc}", _REGENERATE)
                     _write_json(report)
                     return 0 if report["ok"] else 1
 
@@ -609,53 +655,52 @@ class PythonMcpPlugin:
 
     def _http_client(self, ctx: GenerateContext) -> str:
         sec = ctx.security
-        header = dedent(
-            f'''\
-            """HTTP client for the upstream OpenAPI base URL.
-
-            Auth mode: {sec.auth_mode}
-            Secrets strategy: {sec.secrets_strategy}
-            Secrets are read from the environment at runtime; none are stored here.
-            """
-
-            from __future__ import annotations
-
-            import os
-            import time
-            from typing import Any
-            from urllib.parse import quote
-
-            import httpx
-
-            AUTH_MODE = {json.dumps(sec.auth_mode)}
-            '''
+        header = (
+            client_template.HEADER.replace("__AUTH_MODE_JSON__", json.dumps(sec.auth_mode))
+            .replace("__AUTH_MODE__", docstring_text(sec.auth_mode))
+            .replace("__SECRETS_STRATEGY__", docstring_text(sec.secrets_strategy))
         )
         if sec.auth_mode != "oauth2":
             header = header.replace("import time\n", "", 1)  # only the token cache needs it
-        return "\n".join([header, self._auth_block(ctx), _CLIENT_REQUEST])
+        return "\n".join([header, self._auth_block(ctx), client_template.CORE])
 
     def _auth_block(self, ctx: GenerateContext) -> str:
         sec = ctx.security
         if sec.auth_mode == "api_key":
             return dedent(
                 f'''\
+
                 API_KEY_LOCATION_DEFAULT = {json.dumps(sec.api_key_location)}
                 API_KEY_NAME_DEFAULT = {json.dumps(sec.api_key_name)}
+                _AUTH_HINT = "check API_KEY (and API_KEY_LOCATION / API_KEY_NAME)"
+
+
+                def _api_key_settings() -> tuple[str, str, str]:
+                    api_key = os.environ.get("API_KEY")
+                    if not api_key:
+                        raise ConfigError("API_KEY is not set (authMode=api_key)")
+                    location = os.environ.get("API_KEY_LOCATION", API_KEY_LOCATION_DEFAULT)
+                    if location not in ("header", "query"):
+                        raise ConfigError("API_KEY_LOCATION must be 'header' or 'query'")
+                    name = os.environ.get("API_KEY_NAME", API_KEY_NAME_DEFAULT)
+                    return api_key, location, name
+
+
+                def _check_auth() -> None:
+                    _api_key_settings()
+
+
+                def _auth_secrets() -> list[str]:
+                    return [os.environ.get("API_KEY", "")]
 
 
                 def _apply_auth(headers: dict[str, str], params: dict[str, Any]) -> None:
                     """Send API_KEY as a header or query parameter; fail closed when unset."""
-                    api_key = os.environ.get("API_KEY")
-                    if not api_key:
-                        raise RuntimeError("API_KEY is not set (authMode=api_key)")
-                    location = os.environ.get("API_KEY_LOCATION", API_KEY_LOCATION_DEFAULT)
-                    name = os.environ.get("API_KEY_NAME", API_KEY_NAME_DEFAULT)
+                    api_key, location, name = _api_key_settings()
                     if location == "query":
                         params[name] = api_key
-                    elif location == "header":
-                        headers[name] = api_key
                     else:
-                        raise RuntimeError("API_KEY_LOCATION must be 'header' or 'query'")
+                        headers[name] = api_key
 
 
                 def _invalidate_auth() -> bool:
@@ -665,9 +710,11 @@ class PythonMcpPlugin:
         if sec.auth_mode == "oauth2":
             return dedent(
                 f'''\
+
                 OAUTH_TOKEN_URL_DEFAULT = {json.dumps(sec.oauth_token_url)}
                 OAUTH_SCOPES_DEFAULT = {json.dumps(" ".join(sec.oauth_scopes))}
                 OAUTH_AUDIENCE_DEFAULT = {json.dumps(sec.oauth_audience)}
+                _AUTH_HINT = "check OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET and OAUTH_SCOPES"
                 # Refresh this many seconds before the token expires.
                 _REFRESH_MARGIN_SECONDS = 60.0
                 _token: dict[str, Any] = {{"value": None, "expires_at": 0.0}}
@@ -676,15 +723,30 @@ class PythonMcpPlugin:
                 def _required_env(name: str) -> str:
                     value = os.environ.get(name)
                     if not value:
-                        raise RuntimeError(f"{{name}} is not set (authMode=oauth2)")
+                        raise ConfigError(f"{{name}} is not set (authMode=oauth2)")
                     return value
+
+
+                def _token_url() -> str:
+                    token_url = os.environ.get("OAUTH_TOKEN_URL") or OAUTH_TOKEN_URL_DEFAULT
+                    if not token_url.lower().startswith("https://"):
+                        raise ConfigError("OAUTH_TOKEN_URL must use https")
+                    return token_url
+
+
+                def _check_auth() -> None:
+                    _token_url()
+                    _required_env("OAUTH_CLIENT_ID")
+                    _required_env("OAUTH_CLIENT_SECRET")
+
+
+                def _auth_secrets() -> list[str]:
+                    return [os.environ.get("OAUTH_CLIENT_SECRET", ""), str(_token["value"] or "")]
 
 
                 def _fetch_token() -> str:
                     """OAuth2 client credentials grant (RFC 6749 section 4.4), HTTP Basic auth."""
-                    token_url = os.environ.get("OAUTH_TOKEN_URL") or OAUTH_TOKEN_URL_DEFAULT
-                    if not token_url.lower().startswith("https://"):
-                        raise RuntimeError("OAUTH_TOKEN_URL must use https")
+                    token_url = _token_url()
                     client_id = _required_env("OAUTH_CLIENT_ID")
                     client_secret = _required_env("OAUTH_CLIENT_SECRET")
                     data = {{"grant_type": "client_credentials"}}
@@ -694,18 +756,35 @@ class PythonMcpPlugin:
                     audience = os.environ.get("OAUTH_AUDIENCE", OAUTH_AUDIENCE_DEFAULT).strip()
                     if audience:
                         data["audience"] = audience
-                    with httpx.Client(timeout=30.0) as client:
+                    client = _client()
+                    try:
                         response = client.post(
                             token_url,
                             data=data,
                             auth=(client_id, client_secret),
                             headers={{"Accept": "application/json"}},
                         )
-                    response.raise_for_status()
-                    payload = response.json()
-                    access_token = payload.get("access_token")
+                    except httpx.HTTPError as exc:
+                        raise ApiError(
+                            f"could not reach the OAuth2 token URL ({{type(exc).__name__}}); "
+                            "check OAUTH_TOKEN_URL and your network"
+                        ) from None
+                    finally:
+                        client.cookies.clear()
+                    if response.status_code >= 400:
+                        detail = _detail(response.content)
+                        raise ApiError(
+                            f"OAuth2 token request failed: HTTP {{response.status_code}}, {{_AUTH_HINT}}."
+                            + (f" Token endpoint said: {{detail}}" if detail else ""),
+                            response.status_code,
+                        )
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = None
+                    access_token = payload.get("access_token") if isinstance(payload, dict) else None
                     if not access_token:
-                        raise RuntimeError("OAuth2 token response has no access_token")
+                        raise ApiError("OAuth2 token response has no access_token")
                     expires_in = float(payload.get("expires_in") or 300)
                     _token["value"] = access_token
                     _token["expires_at"] = time.monotonic() + expires_in - _REFRESH_MARGIN_SECONDS
@@ -731,6 +810,18 @@ class PythonMcpPlugin:
             )
         return dedent(
             '''\
+
+            _AUTH_HINT = "this API needs credentials; regenerate with an authentication mode"
+
+
+            def _check_auth() -> None:
+                """authMode=none: nothing to check."""
+
+
+            def _auth_secrets() -> list[str]:
+                return []
+
+
             def _apply_auth(headers: dict[str, str], params: dict[str, Any]) -> None:
                 """authMode=none: no credentials (development or public APIs only)."""
 
@@ -746,31 +837,22 @@ class PythonMcpPlugin:
             "# No operations selected."
         )
         title_literal = py_str(ctx.ir.title)
+        imports = self._server_imports(tool_fns)
         return (
             dedent(
                 f'''\
                 """MCP stdio server — official Python SDK MCPServer (mcp 2.x).
 
-                Primary import follows the mcp 2 migration guide:
-                https://py.sdk.modelcontextprotocol.io/v2/migration/#fastmcp-renamed-to-mcpserver
+                Exits with a clear message when API_BASE_URL or the auth settings are wrong.
                 """
 
                 from __future__ import annotations
 
-                import re
-                from typing import Annotated, Literal
-                from urllib.parse import quote
+                {imports}
 
-                from pydantic import Field, JsonValue
+                from {pkg}.client import ConfigError, check_config, request
 
-                from {pkg}.client import request
-
-                try:
-                    from mcp.server.mcpserver import MCPServer as _MCP
-                except ImportError:  # mcp 1.x only — fresh installs pin mcp>=2
-                    from mcp.server.fastmcp import FastMCP as _MCP
-
-                mcp = _MCP({title_literal})
+                mcp = MCPServer({title_literal})
 
 
                 '''
@@ -781,6 +863,11 @@ class PythonMcpPlugin:
 
 
                 def main() -> None:
+                    try:
+                        check_config()
+                    except ConfigError as exc:
+                        sys.stderr.write(f"Cannot start: {exc}\\n")
+                        raise SystemExit(2) from None
                     mcp.run(transport="stdio")
 
 
@@ -789,6 +876,27 @@ class PythonMcpPlugin:
                 """
             )
         )
+
+    @staticmethod
+    def _server_imports(tool_fns: str) -> str:
+        """Only the imports the tool functions use, so the project lints clean.
+
+        A spec string that happens to contain one of these markers only adds an
+        unused import; a used name is never left unimported.
+        """
+        stdlib = ["import re"] if "re.compile(" in tool_fns else []
+        stdlib.append("import sys")
+        typing_names = [n for n in ("Annotated", "Literal") if f"{n}[" in tool_fns]
+        if typing_names:
+            stdlib.append(f"from typing import {', '.join(typing_names)}")
+        if "quote(" in tool_fns:
+            stdlib.append("from urllib.parse import quote")
+        third_party = ["from mcp.server.mcpserver import MCPServer"]
+        pydantic_names = [n for n in ("Field", "JsonValue") if n in tool_fns]
+        if pydantic_names:
+            third_party.append(f"from pydantic import {', '.join(pydantic_names)}")
+        # Joined with the template's 16-space indent so dedent() still lines up.
+        return "\n                ".join([*stdlib, "", *third_party])
 
     def _tool_function(self, tool: ToolMapping, taken_functions: set[str]) -> str:
         """Emit one ``@mcp.tool`` function. Every spec value is escaped or sanitized."""
@@ -803,7 +911,8 @@ class PythonMcpPlugin:
         func_name = py_ident(tool.tool_name, taken_functions, _RESERVED_MODULE_NAMES)
 
         doc = docstring_text(tool.description)
-        found = visible(analyze_operation(schema))
+        all_found = analyze_operation(schema)
+        found = visible(all_found)
         description = tool.description
         if found:
             # The calling model reads this; say it first (ADR-023).
@@ -866,14 +975,20 @@ class PythonMcpPlugin:
             items = ", ".join(f"{py_str(n)}: {py_names[n]}" for n in names)
             return f"{{k: {value} for k, v in {{{items}}}.items() if v is not None}}"
 
+        # Values of sensitive arguments, kept out of error messages (all severities).
+        secret_names = [py_names[f.parameter] for f in all_found if f.parameter in py_names]
+        secrets_arg = f", secrets=({', '.join(secret_names)},)" if secret_names else ""
+
         used = [loc for loc, names in groups.items() if names]
         if not used:
-            body_lines.append(f"    return request({method_literal}, path)")
+            body_lines.append(f"    return request({method_literal}, path{secrets_arg})")
         elif used in (["query"], ["body"]) and not whole_body:
             # One destination: the compact form the earlier generator emitted.
             body_lines.append(f"    payload = {kept(groups[used[0]])}")
             arg = "params" if used == ["query"] else "json_body"
-            body_lines.append(f"    return request({method_literal}, path, {arg}=payload or None)")
+            body_lines.append(
+                f"    return request({method_literal}, path, {arg}=payload or None{secrets_arg})"
+            )
         else:
             call_args: list[str] = []
             if groups["query"]:
@@ -890,7 +1005,9 @@ class PythonMcpPlugin:
             elif groups["body"]:
                 body_lines.append(f"    payload = {kept(groups['body'])}")
                 call_args.append("json_body=payload or None")
-            body_lines.append(f"    return request({method_literal}, path, {', '.join(call_args)})")
+            body_lines.append(
+                f"    return request({method_literal}, path, {', '.join(call_args)}{secrets_arg})"
+            )
 
         body = "\n".join(body_lines)
         return (
@@ -916,62 +1033,3 @@ class PythonMcpPlugin:
             else:
                 out.append(part.replace("{", "{{").replace("}", "}}"))
         return "".join(out)
-
-
-_CLIENT_REQUEST = dedent(
-    """\
-
-    def _send(
-        method: str,
-        url: str,
-        headers: dict[str, str],
-        params: dict[str, Any],
-        json_body: Any,
-    ) -> httpx.Response:
-        with httpx.Client(timeout=30.0) as client:
-            return client.request(
-                method.upper(), url, headers=headers, params=params or None, json=json_body
-            )
-
-
-    def request(
-        method: str,
-        path: str,
-        *,
-        params: dict[str, Any] | None = None,
-        json_body: Any = None,
-        headers: dict[str, str] | None = None,
-        cookies: dict[str, str] | None = None,
-    ) -> Any:
-        base = os.environ.get("API_BASE_URL", "").rstrip("/")
-        if not base:
-            raise RuntimeError("API_BASE_URL is not set")
-        url = f"{base}{path}"
-
-        def build() -> tuple[dict[str, str], dict[str, Any]]:
-            # Operation headers and cookies first; auth is applied last and wins.
-            out: dict[str, str] = dict(headers or {})
-            if cookies:
-                out["Cookie"] = "; ".join(
-                    f"{name}={quote(value, safe='')}" for name, value in cookies.items()
-                )
-            out["Accept"] = "application/json"
-            query: dict[str, Any] = dict(params or {})
-            _apply_auth(out, query)
-            return out, query
-
-        sent_headers, query = build()
-        response = _send(method, url, sent_headers, query, json_body)
-        if response.status_code == 401 and _invalidate_auth():
-            # Token may have been revoked or expired early: refresh once and retry.
-            sent_headers, query = build()
-            response = _send(method, url, sent_headers, query, json_body)
-        response.raise_for_status()
-        if response.status_code == 204 or not response.content:
-            return {"status": response.status_code}
-        content_type = response.headers.get("content-type", "")
-        if "application/json" in content_type:
-            return response.json()
-        return {"text": response.text, "status": response.status_code}
-    """
-)

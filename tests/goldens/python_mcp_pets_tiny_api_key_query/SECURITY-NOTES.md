@@ -2,7 +2,7 @@
 
 The wizard found these risks in the operations and settings you chose.
 They come from the upstream API's design: the generated server sends each value
-where the API expects it.
+where the API expects it, and keeps secrets out of its own error messages.
 
 ## Authentication
 

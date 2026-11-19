@@ -54,6 +54,17 @@ Upstream API base URL defaults from the OpenAPI servers list
 **No authentication.** Requests go to the upstream API without credentials.
 Use this only for development or public APIs.
 
+## Errors and limits
+
+- `API_BASE_URL` must be an `http` or `https` URL with a host and no user name,
+  password, query string or fragment. The server checks it, and the
+  authentication settings, at startup and exits with a clear message.
+- Failed calls return a short, actionable error (HTTP status, what to check, and
+  the API's own message). API keys, OAuth secrets and tokens, and secret
+  arguments such as passwords are replaced with `***`.
+- Responses larger than `MAX_RESPONSE_BYTES` (default 1048576, measured after
+  decompression) are refused. Redirects are not followed.
+
 ## Verify
 
 Check that the server exposes the tools selected at generation time.

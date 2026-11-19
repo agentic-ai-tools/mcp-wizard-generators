@@ -1,25 +1,20 @@
 """MCP stdio server — official Python SDK MCPServer (mcp 2.x).
 
-Primary import follows the mcp 2 migration guide:
-https://py.sdk.modelcontextprotocol.io/v2/migration/#fastmcp-renamed-to-mcpserver
+Exits with a clear message when API_BASE_URL or the auth settings are wrong.
 """
 
 from __future__ import annotations
 
-import re
-from typing import Annotated, Literal
+import sys
+from typing import Annotated
 from urllib.parse import quote
 
+from mcp.server.mcpserver import MCPServer
 from pydantic import Field, JsonValue
 
-from pets_tiny_mcp.client import request
+from pets_tiny_mcp.client import ConfigError, check_config, request
 
-try:
-    from mcp.server.mcpserver import MCPServer as _MCP
-except ImportError:  # mcp 1.x only — fresh installs pin mcp>=2
-    from mcp.server.fastmcp import FastMCP as _MCP
-
-mcp = _MCP("Pets Tiny API")
+mcp = MCPServer("Pets Tiny API")
 
 
 @mcp.tool(name="listpets", description="List all pets")
@@ -44,6 +39,11 @@ def showpetbyid(
 
 
 def main() -> None:
+    try:
+        check_config()
+    except ConfigError as exc:
+        sys.stderr.write(f"Cannot start: {exc}\n")
+        raise SystemExit(2) from None
     mcp.run(transport="stdio")
 
 
