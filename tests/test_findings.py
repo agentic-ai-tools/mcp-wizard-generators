@@ -238,3 +238,55 @@ def test_api_key_in_query_is_an_auth_note_not_an_operation_finding() -> None:
     assert "API key" in notes
     assert "query string" in notes
     assert json.loads(files["generation-manifest.json"])["findings"] == []
+
+
+# --------------------------------------------------------------------- malformed input
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {},
+        {"properties": None},
+        {"properties": ["password"]},
+        "not a schema",
+    ],
+)
+def test_schemas_without_properties_have_no_findings(schema) -> None:
+    assert analyze_operation(schema) == []  # type: ignore[arg-type]
+
+
+def test_non_dict_properties_are_skipped() -> None:
+    schema = _schema(password="string", token=_p("query"))  # type: ignore[arg-type]
+    assert [f.parameter for f in analyze_operation(schema)] == ["token"]
+
+
+def test_operation_findings_survive_a_converter_failure(monkeypatch) -> None:
+    import mcp_wizard_generators.findings as findings
+
+    def boom(_spec):
+        raise ValueError("bad document")
+
+    monkeypatch.setattr(findings, "openapi_to_ir", boom)
+    assert operation_findings(PETSTORE) == {}
+
+
+def test_operation_findings_accept_a_non_dict() -> None:
+    assert operation_findings(None) == {}  # type: ignore[arg-type]
+
+
+def test_short_form_per_location_and_fallback() -> None:
+    by_location = {
+        f.location: f.short
+        for where in ("query", "path", "cookie", "header", "body")
+        for f in analyze_operation(_schema(password=_p(where)))
+    }
+    assert by_location == {
+        "query": "sends password in the URL query string",
+        "path": "puts password in the URL path",
+        "cookie": "sends password in a cookie",
+        "header": "sends password in a header",
+        "body": "sends password in the request body",
+    }
+    custom = Finding("custom", "low", None, None, "Something odd.", "Look into it.")
+    assert custom.short == "Something odd."

@@ -237,10 +237,12 @@ def _input_schema_for_operation(
                         for key in schema.get("required") or []:
                             if isinstance(key, str) and key not in required and key in properties:
                                 required.append(key)
-                    elif "body" not in properties:
-                        properties["body"] = {**schema, IN_KEY: "body", WHOLE_BODY_KEY: True}
-                        if body.get("required") and "body" not in required:
-                            required.append("body")
+                    else:
+                        # A parameter may already be called "body"; never drop the body.
+                        arg = "body" if "body" not in properties else "request_body"
+                        properties[arg] = {**schema, IN_KEY: "body", WHOLE_BODY_KEY: True}
+                        if body.get("required"):
+                            required.append(arg)
                     break
 
     schema: dict[str, Any] = {"type": "object", "properties": properties}
