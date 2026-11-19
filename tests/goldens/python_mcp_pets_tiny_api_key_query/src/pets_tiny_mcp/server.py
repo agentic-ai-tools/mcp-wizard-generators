@@ -6,8 +6,11 @@ https://py.sdk.modelcontextprotocol.io/v2/migration/#fastmcp-renamed-to-mcpserve
 
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Annotated, Literal
 from urllib.parse import quote
+
+from pydantic import Field, JsonValue
 
 from pets_tiny_mcp.client import request
 
@@ -20,7 +23,9 @@ mcp = _MCP("Pets Tiny API")
 
 
 @mcp.tool(name="listpets", description="List all pets")
-def listpets(limit: int | None = None) -> Any:
+def listpets(
+    limit: Annotated[int, Field(le=100, description="Maximum number of pets to return (query parameter `limit`)")] | None = None,
+) -> JsonValue:
     """List all pets"""
     path_template = "/pets"
     path = path_template
@@ -29,7 +34,9 @@ def listpets(limit: int | None = None) -> Any:
 
 
 @mcp.tool(name="showpetbyid", description="Info for a specific pet")
-def showpetbyid(petId: str) -> Any:
+def showpetbyid(
+    petId: Annotated[str, Field(min_length=1, description="Path parameter `petId`")],
+) -> JsonValue:
     """Info for a specific pet"""
     path_template = "/pets/{petId}"
     path = path_template.format(petId=quote(str(petId), safe=""))

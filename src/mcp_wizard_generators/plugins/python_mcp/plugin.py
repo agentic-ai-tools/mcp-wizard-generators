@@ -22,11 +22,13 @@ from mcp_wizard_generators.codegen import (
 from mcp_wizard_generators.findings import Finding, analyze_operation, visible
 from mcp_wizard_generators.models import FileEntry, FileTree, GenerateContext, ToolMapping
 from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
+from mcp_wizard_generators.plugins.python_mcp.annotations import annotation as _annotation
 
 # Names a generated tool function or parameter must not take: module globals the
 # server uses, locals in each tool body, and builtins used in annotations.
+_TYPING_NAMES = ("Any", "Annotated", "Literal", "Field", "JsonValue", "re")
 _RESERVED_MODULE_NAMES = frozenset(
-    {"mcp", "request", "main", "quote", "Any", "annotations", "_MCP"}
+    {"mcp", "request", "main", "quote", "annotations", "_MCP", *_TYPING_NAMES}
 )
 _RESERVED_PARAM_NAMES = frozenset(
     {
@@ -39,7 +41,7 @@ _RESERVED_PARAM_NAMES = frozenset(
         "request",
         "quote",
         "mcp",
-        "Any",
+        *_TYPING_NAMES,
         "str",
         "int",
         "float",
@@ -48,15 +50,6 @@ _RESERVED_PARAM_NAMES = frozenset(
         "dict",
     }
 )
-
-_JSON_TYPE_TO_PY = {
-    "string": "str",
-    "integer": "int",
-    "number": "float",
-    "boolean": "bool",
-    "array": "list",
-    "object": "dict",
-}
 
 
 class PythonMcpPlugin:
@@ -340,6 +333,7 @@ class PythonMcpPlugin:
             dependencies = [
               "mcp>=2.0.0,<3",
               "httpx>=0.27",
+              "pydantic>=2.7,<3",
             ]
 
             [project.scripts]
@@ -352,7 +346,7 @@ class PythonMcpPlugin:
         )
 
     def _requirements(self) -> str:
-        return "mcp>=2.0.0,<3\nhttpx>=0.27\n"
+        return "mcp>=2.0.0,<3\nhttpx>=0.27\npydantic>=2.7,<3\n"
 
     def _env_example(self, ctx: GenerateContext) -> str:
         base = ctx.ir.servers[0] if ctx.ir.servers else "https://api.example.com"
@@ -763,8 +757,11 @@ class PythonMcpPlugin:
 
                 from __future__ import annotations
 
-                from typing import Any
+                import re
+                from typing import Annotated, Literal
                 from urllib.parse import quote
+
+                from pydantic import Field, JsonValue
 
                 from {pkg}.client import request
 
@@ -805,18 +802,6 @@ class PythonMcpPlugin:
         py_names = {wire: py_ident(wire, taken_params, _RESERVED_PARAM_NAMES) for wire in props}
         func_name = py_ident(tool.tool_name, taken_functions, _RESERVED_MODULE_NAMES)
 
-        def annotation(wire: str) -> str:
-            prop = props[wire] if isinstance(props[wire], dict) else {}
-            return _JSON_TYPE_TO_PY.get(str(prop.get("type", "string")), "Any")
-
-        # Required first: a parameter without a default can't follow one with a default.
-        ordered = [w for w in props if w in required] + [w for w in props if w not in required]
-        signature = ", ".join(
-            f"{py_names[w]}: {annotation(w)}"
-            if w in required
-            else f"{py_names[w]}: {annotation(w)} | None = None"
-            for w in ordered
-        )
         doc = docstring_text(tool.description)
         found = visible(analyze_operation(schema))
         description = tool.description
@@ -850,6 +835,23 @@ class PythonMcpPlugin:
             if loc in ("query", "header", "cookie", "body"):
                 return str(loc)
             return "body" if uses_body else "query"
+
+        def annotation(wire: str) -> str:
+            prop = props[wire] if isinstance(props[wire], dict) else {}
+            location = "path" if wire in path_params else where(wire)
+            return _annotation(prop, wire, location, whole_body=prop.get(WHOLE_BODY_KEY) is True)
+
+        # Required first: a parameter without a default can't follow one with a default.
+        ordered = [w for w in props if w in required] + [w for w in props if w not in required]
+        # One argument per line: each carries its type, constraints and description.
+        signature = "".join(
+            f"\n    {py_names[w]}: {annotation(w)},"
+            if w in required
+            else f"\n    {py_names[w]}: {annotation(w)} | None = None,"
+            for w in ordered
+        )
+        if signature:
+            signature += "\n"
 
         groups: dict[str, list[str]] = {"query": [], "header": [], "cookie": [], "body": []}
         for wire in leftover:
@@ -893,7 +895,7 @@ class PythonMcpPlugin:
         body = "\n".join(body_lines)
         return (
             f"@mcp.tool(name={py_str(tool.tool_name)}, description={py_str(description)})\n"
-            f"def {func_name}({signature}) -> Any:\n"
+            f"def {func_name}({signature}) -> JsonValue:\n"
             f'    """{doc}"""\n'
             f"{body}"
         )
