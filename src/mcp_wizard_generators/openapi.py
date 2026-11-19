@@ -91,46 +91,133 @@ def _server_urls(spec: dict[str, Any], source_url: str | None = None) -> list[st
     return []
 
 
+# Where each tool argument goes on the wire (ADR-023). Internal: stripped by
+# models.public_schema() before a schema is shown to a model.
+IN_KEY = "x-mcp-wizard-in"
+WHOLE_BODY_KEY = "x-mcp-wizard-whole-body"
+
+# OpenAPI 3: header parameters with these names SHALL be ignored.
+_IGNORED_HEADERS = frozenset({"accept", "content-type", "authorization"})
+_MAX_REF_DEPTH = 32
+_SWAGGER2_PARAM_KEYS = (
+    "type",
+    "format",
+    "items",
+    "enum",
+    "default",
+    "pattern",
+    "minimum",
+    "maximum",
+    "minLength",
+    "maxLength",
+    "minItems",
+    "maxItems",
+)
+
+
+class _Refs:
+    """Follow in-document ``$ref`` (``#/...``), cutting cycles and runaway depth."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self.spec = spec
+
+    def _lookup(self, ref: str) -> Any:
+        if not ref.startswith("#/"):
+            return None  # external refs are rejected upstream (spec_external_ref)
+        node: Any = self.spec
+        for raw in ref[2:].split("/"):
+            key = raw.replace("~1", "/").replace("~0", "~")
+            if isinstance(node, dict) and key in node:
+                node = node[key]
+            elif isinstance(node, list) and key.isdigit() and int(key) < len(node):
+                node = node[int(key)]
+            else:
+                return None
+        return node
+
+    def resolve(self, node: Any, stack: tuple[str, ...] = ()) -> Any:
+        """A deep copy of ``node`` with every resolvable ``$ref`` inlined."""
+        if len(stack) > _MAX_REF_DEPTH:
+            return {"type": "object"}
+        if isinstance(node, list):
+            return [self.resolve(item, stack) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            siblings = {k: v for k, v in node.items() if k != "$ref"}
+            if ref in stack:
+                # Recursive schema: stop here with a plain object.
+                return {"type": "object", **self.resolve(siblings, stack)}
+            target = self._lookup(ref)
+            resolved = self.resolve(target, (*stack, ref)) if isinstance(target, dict) else {}
+            # OpenAPI 3.1 allows siblings next to $ref; they win over the target.
+            return {**resolved, **self.resolve(siblings, stack)}
+        return {k: self.resolve(v, stack) for k, v in node.items()}
+
+
 def _param_schema(param: dict[str, Any]) -> dict[str, Any]:
     schema = param.get("schema")
     if isinstance(schema, dict):
         out = dict(schema)
     else:
-        out = {}
-        if param.get("type"):
-            out["type"] = param["type"]
-        if param.get("format"):
-            out["format"] = param["format"]
+        # Swagger 2 keeps type information on the parameter itself.
+        out = {key: param[key] for key in _SWAGGER2_PARAM_KEYS if key in param}
     if param.get("description") and "description" not in out:
         out["description"] = param["description"]
-    if "type" not in out:
+    if "type" not in out and "enum" not in out and "items" not in out:
         out["type"] = "string"
     return out
 
 
+def _location(param: dict[str, Any]) -> str:
+    where = param.get("in")
+    if where in ("query", "path", "header", "cookie"):
+        return str(where)
+    return "body"  # Swagger 2 "body" / "formData"
+
+
+def _parameters(
+    operation: dict[str, Any], path_item: dict[str, Any], refs: _Refs
+) -> list[dict[str, Any]]:
+    """Resolved parameters; operation-level ones override path-level (same name + in)."""
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for source in (path_item.get("parameters"), operation.get("parameters")):
+        if not isinstance(source, list):
+            continue
+        for raw in source:
+            param = refs.resolve(raw)
+            if isinstance(param, dict) and isinstance(param.get("name"), str) and param["name"]:
+                merged[(param["name"], str(param.get("in")))] = param
+    return list(merged.values())
+
+
 def _input_schema_for_operation(
-    operation: dict[str, Any], path_item: dict[str, Any]
+    operation: dict[str, Any], path_item: dict[str, Any], refs: _Refs | None = None
 ) -> dict[str, Any]:
+    refs = refs or _Refs({})
     properties: dict[str, Any] = {}
     required: list[str] = []
 
-    params: list[Any] = []
-    for source in (path_item.get("parameters"), operation.get("parameters")):
-        if isinstance(source, list):
-            params.extend(source)
-
-    for param in params:
-        if not isinstance(param, dict):
+    for param in _parameters(operation, path_item, refs):
+        name = param["name"]
+        where = _location(param)
+        if where == "header" and name.lower() in _IGNORED_HEADERS:
             continue
-        name = param.get("name")
-        if not isinstance(name, str) or not name:
+        if name in properties:
             continue
-        properties[name] = _param_schema(param)
-        if param.get("required") or param.get("in") == "path":
-            if name not in required:
-                required.append(name)
+        if param.get("in") == "body":
+            # Swagger 2 body parameter: the whole request body.
+            prop = dict(param.get("schema") or {"type": "object"})
+            prop[WHOLE_BODY_KEY] = True
+        else:
+            prop = _param_schema(param)
+        prop[IN_KEY] = where
+        properties[name] = prop
+        if (param.get("required") or where == "path") and name not in required:
+            required.append(name)
 
-    body = operation.get("requestBody")
+    body = refs.resolve(operation.get("requestBody"))
     if isinstance(body, dict):
         content = body.get("content")
         if isinstance(content, dict):
@@ -138,18 +225,20 @@ def _input_schema_for_operation(
                 media_obj = content.get(media)
                 if isinstance(media_obj, dict) and isinstance(media_obj.get("schema"), dict):
                     schema = media_obj["schema"]
-                    # Prefer object properties when present; otherwise wrap under "body".
+                    # Prefer object properties when present; otherwise one whole-body argument.
                     if schema.get("type") == "object" or "properties" in schema:
                         for key, value in (schema.get("properties") or {}).items():
                             if isinstance(key, str) and key not in properties:
-                                properties[key] = (
+                                prop = (
                                     dict(value) if isinstance(value, dict) else {"type": "string"}
                                 )
+                                prop[IN_KEY] = "body"
+                                properties[key] = prop
                         for key in schema.get("required") or []:
                             if isinstance(key, str) and key not in required and key in properties:
                                 required.append(key)
-                    else:
-                        properties.setdefault("body", dict(schema))
+                    elif "body" not in properties:
+                        properties["body"] = {**schema, IN_KEY: "body", WHOLE_BODY_KEY: True}
                         if body.get("required") and "body" not in required:
                             required.append("body")
                     break
@@ -176,6 +265,7 @@ def openapi_to_ir(spec: dict[str, Any], *, source_url: str | None = None) -> Int
     version = str(info.get("version") or "0.0.0")
     spec_version = str(spec.get("openapi") or spec.get("swagger") or "3.0")
     servers = _server_urls(spec, source_url)
+    refs = _Refs(spec)
 
     ops: list[IrOperation] = []
     paths = spec.get("paths") or {}
@@ -198,7 +288,7 @@ def openapi_to_ir(spec: dict[str, Any], *, source_url: str | None = None) -> Int
                         summary=operation.get("summary"),
                         description=operation.get("description"),
                         tags=tuple(str(tag) for tag in tags),
-                        input_schema=_input_schema_for_operation(operation, path_item),
+                        input_schema=_input_schema_for_operation(operation, path_item, refs),
                         servers=tuple(servers),
                     )
                 )

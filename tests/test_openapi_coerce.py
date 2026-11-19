@@ -290,7 +290,7 @@ def test_request_body_object_and_non_object_schemas() -> None:
     ir3 = openapi_to_ir(plus_json)
     props = ir3.operations[0].input_schema["properties"]
     assert props["id"]["type"] == "integer"
-    assert props["weird"] == {"type": "string"}
+    assert props["weird"] == {"type": "string", "x-mcp-wizard-in": "body"}
     # "missing" not in properties → not added to required
     assert ir3.operations[0].input_schema["required"] == ["id"]
 
