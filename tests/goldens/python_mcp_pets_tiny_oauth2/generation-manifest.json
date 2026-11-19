@@ -29,5 +29,6 @@
       ],
       "audience": "https://petstore.example.com"
     }
-  }
+  },
+  "findings": []
 }

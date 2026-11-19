@@ -56,6 +56,12 @@ Set the key in `API_KEY` (never commit it). `API_KEY_LOCATION` and
 `API_KEY_NAME` default to the values chosen in the wizard.
 If `API_KEY` is missing, requests fail instead of going out unauthenticated.
 
+## Security notes
+
+Some selected operations or settings expose secrets (for example a password in
+the URL). Read **SECURITY-NOTES.md** before you run this server; it explains each
+risk and how to remove a tool.
+
 ## Verify
 
 Check that the server exposes the tools selected at generation time.

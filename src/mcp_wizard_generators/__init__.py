@@ -1,5 +1,6 @@
 """MCP Wizard generators — IR → MCP tool map → file tree (no HTTP servers)."""
 
+from mcp_wizard_generators.findings import Finding, operation_findings
 from mcp_wizard_generators.models import (
     FileEntry,
     FileTree,
@@ -16,6 +17,7 @@ from mcp_wizard_generators.registry import GeneratorRegistry, get_default_regist
 __all__ = [
     "FileEntry",
     "FileTree",
+    "Finding",
     "GenerateContext",
     "GeneratorRegistry",
     "IntermediateRep",
@@ -25,6 +27,7 @@ __all__ = [
     "generate_python_mcp",
     "generate_python_mcp_result",
     "get_default_registry",
+    "operation_findings",
     "validate_package_name",
 ]
 

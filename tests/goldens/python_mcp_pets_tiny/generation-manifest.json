@@ -22,5 +22,6 @@
   "security": {
     "authMode": "none",
     "secretsStrategy": "dotenv_example_only"
-  }
+  },
+  "findings": []
 }

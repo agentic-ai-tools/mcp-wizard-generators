@@ -26,5 +26,6 @@
       "location": "query",
       "name": "api_key"
     }
-  }
+  },
+  "findings": []
 }
