@@ -19,6 +19,7 @@ from mcp_wizard_generators.codegen import (
     py_str,
     toml_str,
 )
+from mcp_wizard_generators.findings import Finding, analyze_operation, visible
 from mcp_wizard_generators.models import FileEntry, FileTree, GenerateContext, ToolMapping
 from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
 
@@ -86,7 +87,71 @@ class PythonMcpPlugin:
             FileEntry(f"src/{pkg}/verify.py", self._verify_module(pkg, ctx, tools)),
             FileEntry("generation-manifest.json", json.dumps(self._manifest(ctx), indent=2) + "\n"),
         ]
+        notes = self._security_notes(ctx)
+        if notes:
+            entries.append(FileEntry("SECURITY-NOTES.md", notes))
         return FileTree(entries=entries, root_name=root_name)
+
+    @staticmethod
+    def _tool_findings(tools: list[ToolMapping]) -> list[tuple[ToolMapping, list[Finding]]]:
+        """Findings worth showing, per included tool (ADR-023); clean tools omitted."""
+        out = []
+        for tool in tools:
+            found = visible(analyze_operation(tool.input_schema))
+            if found:
+                out.append((tool, found))
+        return out
+
+    @staticmethod
+    def _auth_notes(ctx: GenerateContext) -> list[str]:
+        sec = ctx.security
+        if sec.auth_mode == "api_key" and sec.api_key_location == "query":
+            return [
+                f"- **API key in the query string.** Every request sends the API key as "
+                f"`{one_line(sec.api_key_name)}` in the URL, where proxies, servers and logs "
+                "can record it. Prefer a header if the API accepts one (Security step: API key "
+                "location = header), and keep the key out of shared logs."
+            ]
+        return []
+
+    def _security_notes(self, ctx: GenerateContext) -> str:
+        tool_findings = self._tool_findings(ctx.tool_map.tools)
+        auth_notes = self._auth_notes(ctx)
+        if not tool_findings and not auth_notes:
+            return ""
+        lines = [
+            f"# Security notes: {one_line(ctx.ir.title)} MCP",
+            "",
+            "The wizard found these risks in the operations and settings you chose.",
+            "They come from the upstream API's design: the generated server sends each value",
+            "where the API expects it.",
+            "",
+        ]
+        if tool_findings:
+            lines += ["## Tools", ""]
+            for tool, found in tool_findings:
+                lines.append(
+                    f"### `{tool.tool_name}` ({tool.method.upper()} {one_line(tool.path)})"
+                )
+                lines.append("")
+                for f in found:
+                    lines.append(f"- **{f.severity.capitalize()}**: {f.message}")
+                    lines.append(f"  {f.remediation}")
+                lines.append("")
+            lines += [
+                "### Remove a tool",
+                "",
+                "- **Regenerate (recommended):** in the wizard, untick the operation on the",
+                "  Operations step and generate again.",
+                "- **Edit this project:** delete the tool's `@mcp.tool` function from",
+                f"  `src/{ctx.package_name}/server.py`, remove its entry from",
+                "  `generation-manifest.json` and from `EXPECTED` in `verify.py`, then run",
+                f"  `python -m {ctx.package_name}.verify`.",
+                "",
+            ]
+        if auth_notes:
+            lines += ["## Authentication", "", *auth_notes, ""]
+        return "\n".join(lines)
 
     def _manifest(self, ctx: GenerateContext) -> dict:
         return {
@@ -106,6 +171,11 @@ class PythonMcpPlugin:
                 for t in ctx.tool_map.tools
             ],
             "security": ctx.security.manifest(),
+            "findings": [
+                {"tool": tool.tool_name, "operationId": tool.operation_id, **f.to_dict()}
+                for tool, found in self._tool_findings(ctx.tool_map.tools)
+                for f in found
+            ],
         }
 
     def _readme(self, ctx: GenerateContext) -> str:
@@ -174,6 +244,7 @@ class PythonMcpPlugin:
                 f"(`{one_line(base)}`). Override with `API_BASE_URL`.",
                 "",
                 *self._readme_auth(ctx),
+                *self._readme_security(ctx),
                 "## Verify",
                 "",
                 "Check that the server exposes the tools selected at generation time.",
@@ -213,6 +284,18 @@ class PythonMcpPlugin:
                 "",
             ]
         )
+
+    def _readme_security(self, ctx: GenerateContext) -> list[str]:
+        if not self._tool_findings(ctx.tool_map.tools) and not self._auth_notes(ctx):
+            return []
+        return [
+            "## Security notes",
+            "",
+            "Some selected operations or settings expose secrets (for example a password in",
+            "the URL). Read **SECURITY-NOTES.md** before you run this server; it explains each",
+            "risk and how to remove a tool.",
+            "",
+        ]
 
     def _readme_auth(self, ctx: GenerateContext) -> list[str]:
         sec = ctx.security
@@ -735,6 +818,12 @@ class PythonMcpPlugin:
             for w in ordered
         )
         doc = docstring_text(tool.description)
+        found = visible(analyze_operation(schema))
+        description = tool.description
+        if found:
+            # The calling model reads this; say it first (ADR-023).
+            warning = "; ".join(f.short for f in found)
+            description = f"WARNING: {warning} (see SECURITY-NOTES.md). {description}"
 
         formatted = [p for p in sorted(path_params) if p in props]
         method = tool.method.upper()
@@ -803,7 +892,7 @@ class PythonMcpPlugin:
 
         body = "\n".join(body_lines)
         return (
-            f"@mcp.tool(name={py_str(tool.tool_name)}, description={py_str(tool.description)})\n"
+            f"@mcp.tool(name={py_str(tool.tool_name)}, description={py_str(description)})\n"
             f"def {func_name}({signature}) -> Any:\n"
             f'    """{doc}"""\n'
             f"{body}"
