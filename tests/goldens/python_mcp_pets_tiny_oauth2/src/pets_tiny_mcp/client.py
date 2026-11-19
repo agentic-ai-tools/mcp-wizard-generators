@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -84,7 +85,7 @@ def _send(
     url: str,
     headers: dict[str, str],
     params: dict[str, Any],
-    json_body: dict[str, Any] | None,
+    json_body: Any,
 ) -> httpx.Response:
     with httpx.Client(timeout=30.0) as client:
         return client.request(
@@ -97,22 +98,33 @@ def request(
     path: str,
     *,
     params: dict[str, Any] | None = None,
-    json_body: dict[str, Any] | None = None,
+    json_body: Any = None,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
 ) -> Any:
     base = os.environ.get("API_BASE_URL", "").rstrip("/")
     if not base:
         raise RuntimeError("API_BASE_URL is not set")
     url = f"{base}{path}"
-    headers: dict[str, str] = {"Accept": "application/json"}
-    query: dict[str, Any] = dict(params or {})
-    _apply_auth(headers, query)
-    response = _send(method, url, headers, query, json_body)
+
+    def build() -> tuple[dict[str, str], dict[str, Any]]:
+        # Operation headers and cookies first; auth is applied last and wins.
+        out: dict[str, str] = dict(headers or {})
+        if cookies:
+            out["Cookie"] = "; ".join(
+                f"{name}={quote(value, safe='')}" for name, value in cookies.items()
+            )
+        out["Accept"] = "application/json"
+        query: dict[str, Any] = dict(params or {})
+        _apply_auth(out, query)
+        return out, query
+
+    sent_headers, query = build()
+    response = _send(method, url, sent_headers, query, json_body)
     if response.status_code == 401 and _invalidate_auth():
         # Token may have been revoked or expired early: refresh once and retry.
-        headers = {"Accept": "application/json"}
-        query = dict(params or {})
-        _apply_auth(headers, query)
-        response = _send(method, url, headers, query, json_body)
+        sent_headers, query = build()
+        response = _send(method, url, sent_headers, query, json_body)
     response.raise_for_status()
     if response.status_code == 204 or not response.content:
         return {"status": response.status_code}

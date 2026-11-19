@@ -17,6 +17,22 @@ SECRETS_STRATEGIES = frozenset({"dotenv_example_only", "env", "secret_manager"})
 _API_KEY_NAME = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}")
 
 
+INTERNAL_SCHEMA_PREFIX = "x-mcp-wizard-"
+
+
+def public_schema(schema: Any) -> Any:
+    """``schema`` without the generator's internal ``x-mcp-wizard-*`` markers."""
+    if isinstance(schema, dict):
+        return {
+            k: public_schema(v)
+            for k, v in schema.items()
+            if not (isinstance(k, str) and k.startswith(INTERNAL_SCHEMA_PREFIX))
+        }
+    if isinstance(schema, list):
+        return [public_schema(v) for v in schema]
+    return schema
+
+
 @dataclass(frozen=True)
 class IrOperation:
     """One OpenAPI operation in the intermediate representation."""

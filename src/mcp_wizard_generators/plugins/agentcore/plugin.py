@@ -13,7 +13,13 @@ from mcp_wizard_generators.codegen import (
     py_str,
     toml_str,
 )
-from mcp_wizard_generators.models import FileEntry, FileTree, GenerateContext, ToolMapping
+from mcp_wizard_generators.models import (
+    FileEntry,
+    FileTree,
+    GenerateContext,
+    ToolMapping,
+    public_schema,
+)
 
 
 class AgentCorePythonPlugin:
@@ -180,7 +186,7 @@ class AgentCorePythonPlugin:
         payload = {
             t.tool_name: {
                 "description": t.description,
-                "inputSchema": t.input_schema,
+                "inputSchema": public_schema(t.input_schema),
                 "upstream": {"method": t.method.upper(), "path": t.path},
                 "operationId": t.operation_id,
             }

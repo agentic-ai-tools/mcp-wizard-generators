@@ -20,6 +20,7 @@ from mcp_wizard_generators.codegen import (
     toml_str,
 )
 from mcp_wizard_generators.models import FileEntry, FileTree, GenerateContext, ToolMapping
+from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
 
 # Names a generated tool function or parameter must not take: module globals the
 # server uses, locals in each tool body, and builtins used in annotations.
@@ -31,6 +32,9 @@ _RESERVED_PARAM_NAMES = frozenset(
         "path",
         "path_template",
         "payload",
+        "query",
+        "headers",
+        "cookies",
         "request",
         "quote",
         "mcp",
@@ -542,6 +546,7 @@ class PythonMcpPlugin:
             import os
             import time
             from typing import Any
+            from urllib.parse import quote
 
             import httpx
 
@@ -747,21 +752,54 @@ class PythonMcpPlugin:
 
         leftover = [n for n in props if n not in path_params]
         method_literal = py_str(method)
-        if leftover:
-            dict_items = ", ".join(f"{py_str(n)}: {py_names[n]}" for n in leftover)
-            body_lines.append(
-                f"    payload = {{k: v for k, v in {{{dict_items}}}.items() if v is not None}}"
-            )
-            if uses_body:
-                body_lines.append(
-                    f"    return request({method_literal}, path, json_body=payload or None)"
-                )
-            else:
-                body_lines.append(
-                    f"    return request({method_literal}, path, params=payload or None)"
-                )
-        else:
+
+        def where(wire: str) -> str:
+            # IR from OpenAPI says where each argument goes (ADR-023). Older IR JSON
+            # without it keeps the previous rule: body for POST/PUT/PATCH, else query.
+            prop = props[wire] if isinstance(props[wire], dict) else {}
+            loc = prop.get(IN_KEY)
+            if loc in ("query", "header", "cookie", "body"):
+                return str(loc)
+            return "body" if uses_body else "query"
+
+        groups: dict[str, list[str]] = {"query": [], "header": [], "cookie": [], "body": []}
+        for wire in leftover:
+            groups[where(wire)].append(wire)
+        whole_body = [
+            w
+            for w in groups["body"]
+            if isinstance(props[w], dict) and props[w].get(WHOLE_BODY_KEY) is True
+        ]
+
+        def kept(names: list[str], value: str = "v") -> str:
+            items = ", ".join(f"{py_str(n)}: {py_names[n]}" for n in names)
+            return f"{{k: {value} for k, v in {{{items}}}.items() if v is not None}}"
+
+        used = [loc for loc, names in groups.items() if names]
+        if not used:
             body_lines.append(f"    return request({method_literal}, path)")
+        elif used in (["query"], ["body"]) and not whole_body:
+            # One destination: the compact form the earlier generator emitted.
+            body_lines.append(f"    payload = {kept(groups[used[0]])}")
+            arg = "params" if used == ["query"] else "json_body"
+            body_lines.append(f"    return request({method_literal}, path, {arg}=payload or None)")
+        else:
+            call_args: list[str] = []
+            if groups["query"]:
+                body_lines.append(f"    query = {kept(groups['query'])}")
+                call_args.append("params=query or None")
+            if groups["header"]:
+                body_lines.append(f"    headers = {kept(groups['header'], 'str(v)')}")
+                call_args.append("headers=headers or None")
+            if groups["cookie"]:
+                body_lines.append(f"    cookies = {kept(groups['cookie'], 'str(v)')}")
+                call_args.append("cookies=cookies or None")
+            if whole_body:
+                call_args.append(f"json_body={py_names[whole_body[0]]}")
+            elif groups["body"]:
+                body_lines.append(f"    payload = {kept(groups['body'])}")
+                call_args.append("json_body=payload or None")
+            body_lines.append(f"    return request({method_literal}, path, {', '.join(call_args)})")
 
         body = "\n".join(body_lines)
         return (
@@ -797,7 +835,7 @@ _CLIENT_REQUEST = dedent(
         url: str,
         headers: dict[str, str],
         params: dict[str, Any],
-        json_body: dict[str, Any] | None,
+        json_body: Any,
     ) -> httpx.Response:
         with httpx.Client(timeout=30.0) as client:
             return client.request(
@@ -810,22 +848,33 @@ _CLIENT_REQUEST = dedent(
         path: str,
         *,
         params: dict[str, Any] | None = None,
-        json_body: dict[str, Any] | None = None,
+        json_body: Any = None,
+        headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
     ) -> Any:
         base = os.environ.get("API_BASE_URL", "").rstrip("/")
         if not base:
             raise RuntimeError("API_BASE_URL is not set")
         url = f"{base}{path}"
-        headers: dict[str, str] = {"Accept": "application/json"}
-        query: dict[str, Any] = dict(params or {})
-        _apply_auth(headers, query)
-        response = _send(method, url, headers, query, json_body)
+
+        def build() -> tuple[dict[str, str], dict[str, Any]]:
+            # Operation headers and cookies first; auth is applied last and wins.
+            out: dict[str, str] = dict(headers or {})
+            if cookies:
+                out["Cookie"] = "; ".join(
+                    f"{name}={quote(value, safe='')}" for name, value in cookies.items()
+                )
+            out["Accept"] = "application/json"
+            query: dict[str, Any] = dict(params or {})
+            _apply_auth(out, query)
+            return out, query
+
+        sent_headers, query = build()
+        response = _send(method, url, sent_headers, query, json_body)
         if response.status_code == 401 and _invalidate_auth():
             # Token may have been revoked or expired early: refresh once and retry.
-            headers = {"Accept": "application/json"}
-            query = dict(params or {})
-            _apply_auth(headers, query)
-            response = _send(method, url, headers, query, json_body)
+            sent_headers, query = build()
+            response = _send(method, url, sent_headers, query, json_body)
         response.raise_for_status()
         if response.status_code == 204 or not response.content:
             return {"status": response.status_code}

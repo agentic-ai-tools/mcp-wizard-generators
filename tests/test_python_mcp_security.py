@@ -148,6 +148,33 @@ def test_api_key_header_uses_configured_name(load_client, monkeypatch) -> None:
     assert "api_key" not in seen[0].url.params
 
 
+def test_operation_headers_and_cookies_are_sent_and_auth_wins(load_client, monkeypatch) -> None:
+    """Header/cookie parameters reach the wire (ADR-023); they never override auth."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _ok(request)
+
+    client = load_client(
+        {"authMode": "api_key", "apiKey": {"location": "header", "name": "X-Pet-Key"}}, handler
+    )
+    monkeypatch.setenv("API_KEY", "s3cret")
+    client.request(
+        "delete",
+        "/pets/1",
+        params={"force": True},
+        headers={"X-Trace": "abc", "X-Pet-Key": "spoofed", "Accept": "text/html"},
+        cookies={"session": "a b;c"},
+    )
+    sent = seen[0]
+    assert sent.headers["X-Trace"] == "abc"
+    assert sent.headers["X-Pet-Key"] == "s3cret"
+    assert sent.headers["Accept"] == "application/json"
+    assert sent.headers["Cookie"] == "session=a%20b%3Bc"
+    assert sent.url.params["force"] == "true"
+
+
 def test_api_key_query_param(load_client, monkeypatch) -> None:
     seen: list[httpx.Request] = []
 
