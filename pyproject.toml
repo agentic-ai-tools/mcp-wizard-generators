@@ -47,6 +47,8 @@ dev = [
   "twine>=5.0",
   # PEP 440 validation for scripts/compute_pep440_version.py.
   "packaging>=24.0",
+  # Hash lock for generated python-mcp projects (scripts/lock_python_mcp.py).
+  "uv>=0.5",
 ]
 
 [project.scripts]

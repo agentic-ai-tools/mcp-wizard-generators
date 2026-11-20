@@ -1,0 +1,4 @@
+# Hash-pinned dependencies, prepared by mcp-wizard-generators:
+# every package for every OS and CPython 3.11+, with sha256 hashes. Install with
+#   pip install --require-hashes -r requirements.lock
+#   pip install --no-deps -e .

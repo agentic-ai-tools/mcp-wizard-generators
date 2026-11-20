@@ -1,0 +1,6 @@
+# Direct dependencies of every generated python-mcp project (ADR-023).
+# requirements.txt next to this file is the hash lock compiled from it:
+#   python scripts/lock_python_mcp.py
+mcp>=2.0.0,<3
+httpx>=0.28,<1
+pydantic>=2.7,<3

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.25,<2"]
 build-backend = "hatchling.build"
 
 [project]
@@ -9,7 +9,7 @@ description = "Generated MCP server for Pets Tiny API"
 requires-python = ">=3.11"
 dependencies = [
   "mcp>=2.0.0,<3",
-  "httpx>=0.27",
+  "httpx>=0.28,<1",
   "pydantic>=2.7,<3",
 ]
 

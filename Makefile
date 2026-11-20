@@ -8,7 +8,7 @@
 #   - macOS / Linux / WSL → scripts/*.sh
 # Override: `make USE_PS1=1 test` or `make USE_SH=1 test`
 
-.PHONY: help bootstrap test e2e tox lint cli-smoke clean format dist
+.PHONY: help bootstrap test e2e tox lint cli-smoke clean format dist lock
 
 SHELL := /bin/sh
 
@@ -63,6 +63,7 @@ help:
 	@echo "  make lint        ruff format --check + ruff check"
 	@echo "  make format      ruff format + ruff check --fix"
 	@echo "  make dist        build wheel + sdist into dist/ (python -m build)"
+	@echo "  make lock        refresh the generated-project hash lock (needs uv + network)"
 	@echo "  make cli-smoke   generate pets fixture to .smoke-out(+.zip)"
 	@echo "  make clean       remove caches, venv, smoke artifacts"
 	@echo ""
@@ -89,6 +90,10 @@ format:
 
 cli-smoke:
 	$(RUN_SMOKE)
+
+# Plain Python, so the same command works in every shell.
+lock:
+	python scripts/lock_python_mcp.py
 
 dist:
 	$(RUN_DIST)
