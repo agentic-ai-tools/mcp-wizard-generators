@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     py = sub.add_parser(
         "generate-python",
-        help="Convenience: local Python MCP (FastMCP/MCPServer) → out-dir and/or zip",
+        help="Convenience: local Python MCP (mcp 2.x MCPServer) → out-dir and/or zip",
     )
     py.add_argument(
         "--ir",

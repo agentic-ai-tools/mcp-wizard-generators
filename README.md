@@ -29,9 +29,8 @@ Generated servers use the **official MCP Python SDK** (`mcp` on PyPI) **2.x**:
 | SDK line | High-level class | Import |
 |----------|------------------|--------|
 | 2.x (pinned) | **MCPServer** | `from mcp.server.mcpserver import MCPServer` |
-| 1.x (legacy) | **FastMCP** | `from mcp.server.fastmcp import FastMCP` |
 
-Fresh zips pin `mcp>=2.0.0,<3` and import `MCPServer` (with an optional FastMCP fallback). Transport is **stdio** for Cursor local MCP. Upstream HTTP calls use **httpx** against `API_BASE_URL`. Generated READMEs include a short OS matrix for venv activate (`bin` vs `Scripts`, including Git Bash on Windows).
+Fresh zips pin `mcp>=2.0.0,<3` and import only `MCPServer`; mcp 1.x is not supported. Transport is **stdio** for Cursor local MCP. Upstream HTTP calls use **httpx** against `API_BASE_URL`. Generated READMEs include a short OS matrix for venv activate (`bin` vs `Scripts`, including Git Bash on Windows).
 
 ## Layout
 
@@ -101,7 +100,7 @@ aren't slugs and unknown HTTP methods. `tests/test_generated_code_hardening.py` 
   - One shared httpx client; redirects are not followed.
   - Responses over `MAX_RESPONSE_BYTES` (1 MiB by default) are refused.
   - Errors say what to check, and credentials in them are replaced with `***`.
-  - mcp 2.x only (no FastMCP fallback).
+  - mcp 2.x only.
 - **Dependencies and tests:** every zip includes a hash-pinned `requirements.lock`, upper bounds on its dependencies, and a `tests/` folder (tool regression, auth failures, HTTP status handling, redaction) that runs without network.
 
 **`security` (ADR-017):** pass the session's saved `SecurityConfig` JSON as-is. Every mode is
@@ -227,15 +226,18 @@ Console script (after install): `mcp-wizard-gen …` (Windows: `.venv\Scripts\mc
 
 | Path | Purpose |
 |------|---------|
-| `pyproject.toml` / `requirements.txt` | `mcp` + `httpx` deps |
-| `README.md` | SDK choice, run + Cursor setup |
+| `pyproject.toml` / `requirements.txt` | `mcp`, `httpx` and `pydantic`, each with an upper bound; `test` extra for pytest |
+| `requirements.lock` | Hash-pinned lock for every OS and CPython 3.11+ (`pip install --require-hashes -r requirements.lock`) |
+| `README.md` | SDK choice, run + Cursor setup, errors and limits, tests |
 | `.env.example` | `API_BASE_URL` + auth env vars for the chosen mode (placeholders only, never secrets) |
 | `.cursor/mcp.json` | Cursor MCP snippet (`command`/`args`/`env`) |
-| `src/<pkg>/server.py` | FastMCP/MCPServer tools (1:1 with ops) |
-| `src/<pkg>/client.py` | httpx → upstream API, applying the configured auth (API key / OAuth2 client credentials) |
+| `src/<pkg>/server.py` | MCPServer tools (1:1 with ops), typed with `Annotated[..., Field(...)]` |
+| `src/<pkg>/client.py` | httpx → upstream API, applying the configured auth; config checks, size limit, redacted errors |
 | `src/<pkg>/__main__.py` | `python -m <pkg>` stdio entry |
 | `src/<pkg>/verify.py` | `python -m <pkg>.verify` — tool count and metadata (`<dist>-verify` after install) |
-| `generation-manifest.json` | tools + generator metadata |
+| `tests/` | Offline pytest suite: tools, auth failures, HTTP status handling, redaction |
+| `SECURITY-NOTES.md` | Only when selected operations send a secret where it can be logged; how to remove them |
+| `generation-manifest.json` | tools, `findings` and generator metadata |
 
 **Out of scope in this slice:** AgentCore cloud deploy scaffolding, Agent Rules enforcement/embedding, non-Python languages, GitHub repo write delivery.
 
