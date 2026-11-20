@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-wizard-generators"
-version = "0.4.2"
+version = "0.5.0"
 description = "Pluggable OpenAPI → MCP generators for MCP Wizard (local Python MCP + AgentCore)."
 readme = "README.md"
 requires-python = ">=3.11"

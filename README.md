@@ -93,6 +93,17 @@ wire names, and path arguments are URL-encoded at runtime. File paths that would
 project (`..`, absolute, drive letters) raise `ValueError`, as do tool-name overrides that
 aren't slugs and unknown HTTP methods. `tests/test_generated_code_hardening.py` covers this.
 
+**Hardened python-mcp output (0.5.0, ADR-023):**
+- **Secret exposure:** `operation_findings(spec)` flags operations that send a secret where it can be logged, such as a password in the URL. A query or path parameter is medium severity, a cookie is low. The API uses the result to warn and untick those operations, and zips that include them get `SECURITY-NOTES.md`, a warning in the tool description, and a `findings` list in the manifest.
+- **Typed tools:** each tool argument is `Annotated[<type>, Field(...)]`, with `Literal` enums, numeric and length limits, patterns, and a description of where the value goes. Tools return `JsonValue`.
+- **Client:**
+  - `API_BASE_URL` and the auth settings are checked at startup.
+  - One shared httpx client; redirects are not followed.
+  - Responses over `MAX_RESPONSE_BYTES` (1 MiB by default) are refused.
+  - Errors say what to check, and credentials in them are replaced with `***`.
+  - mcp 2.x only (no FastMCP fallback).
+- **Dependencies and tests:** every zip includes a hash-pinned `requirements.lock`, upper bounds on its dependencies, and a `tests/` folder (tool regression, auth failures, HTTP status handling, redaction) that runs without network.
+
 **`security` (ADR-017):** pass the session's saved `SecurityConfig` JSON as-is. Every mode is
 honored in the generated `client.py`; invalid or unsupported settings raise `ValueError`
 **before** anything is written (never a silent downgrade to no auth).
@@ -321,7 +332,7 @@ Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run
 | Default `main` | `{base}rc{N}` release candidate | **TestPyPI only** |
 | `release/X.Y.Z` | final `X.Y.Z` only | **TestPyPI then PyPI** |
 
-- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.4.2`) for `.dev` / `rc` builds.
+- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.5.0`) for `.dev` / `rc` builds.
 - Feature `N` combines a crc32 band of the normalized branch name with `GITHUB_RUN_NUMBER` so re-publishes get a new developmental version.
 - `main` uses `N = GITHUB_RUN_NUMBER` → `{base}rc{N}`.
 - Final releases: cut a branch named **`release/X.Y.Z`**, with `pyproject.toml` and `src/mcp_wizard_generators/__init__.__version__` equal to that exact public version; quality must pass, then the workflow uploads to TestPyPI and PyPI.
