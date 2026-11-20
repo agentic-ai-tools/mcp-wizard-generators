@@ -17,6 +17,7 @@ from mcp_wizard_generators.models import (
     GenerateContext,
     ServerCapabilities,
 )
+from mcp_wizard_generators.plugins.deploy import deploy_docs, github_actions, scripts
 from mcp_wizard_generators.plugins.deploy.constants import (
     CONTAINER_PORT,
     CONTAINER_UID,
@@ -36,8 +37,8 @@ class DockerDeployment:
     display_name = "Docker (streamable HTTP)"
     requires = frozenset({"streamable-http"})
     iac_options = frozenset({"none"})
-    ci_options = frozenset({"none"})
-    supports_scripts = False
+    ci_options = frozenset({"none", "github-actions"})
+    supports_scripts = True
     supports_inbound_auth = True
 
     def validate(self, config: DeploymentConfig) -> None:
@@ -54,15 +55,22 @@ class DockerDeployment:
 
     def generate(self, ctx: GenerateContext, caps: ServerCapabilities) -> FileTree:
         jwt = JWT_FEATURE in caps.features
-        return FileTree(
-            entries=[
-                FileEntry("Dockerfile", self._dockerfile(caps)),
-                FileEntry(".dockerignore", self._dockerignore()),
-                FileEntry("docker-compose.yml", self._compose(ctx, caps, jwt)),
-                FileEntry("README.md", self._readme(ctx, caps, jwt)),
-            ],
-            root_name=caps.package_name.replace("_", "-"),
-        )
+        entries = [
+            FileEntry("Dockerfile", self._dockerfile(caps)),
+            FileEntry(".dockerignore", self._dockerignore()),
+            FileEntry("docker-compose.yml", self._compose(ctx, caps, jwt)),
+            FileEntry("README.md", self._readme(ctx, caps, jwt)),
+            FileEntry("DEPLOY.md", deploy_docs.docker_deploy_md(ctx, caps, jwt=jwt)),
+        ]
+        if ctx.deployment.ci == "github-actions":
+            entries += [
+                github_actions.ci_workflow(caps, image=True),
+                github_actions.release_workflow(caps),
+                github_actions.dependabot(["github-actions", "docker"]),
+            ]
+        if ctx.deployment.scripts:
+            entries += [*scripts.docker_scripts(caps), scripts.gitattributes()]
+        return FileTree(entries=entries, root_name=caps.package_name.replace("_", "-"))
 
     @staticmethod
     def _dockerfile(caps: ServerCapabilities) -> str:
@@ -155,7 +163,8 @@ CMD ["python", "-m", "{module}"]
                 f"    image: {service}:local",
                 "    ports:",
                 "      # This machine only. Publish more widely only with JWT auth.",
-                f"      - {_yaml(f'127.0.0.1:{port}:{port}')}",
+                "      # Port taken? Set MCP_HOST_PORT in .env (for example 8001).",
+                f"      - {_yaml('127.0.0.1:${MCP_HOST_PORT:-' + str(port) + '}:' + str(port))}",
                 "    env_file:",
                 "      # API_BASE_URL and upstream credentials; never baked into the image.",
                 "      - path: .env",

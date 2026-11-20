@@ -6,7 +6,8 @@ services:
     image: pets-tiny-mcp:local
     ports:
       # This machine only. Publish more widely only with JWT auth.
-      - "127.0.0.1:8000:8000"
+      # Port taken? Set MCP_HOST_PORT in .env (for example 8001).
+      - "127.0.0.1:${MCP_HOST_PORT:-8000}:8000"
     env_file:
       # API_BASE_URL and upstream credentials; never baked into the image.
       - path: .env
