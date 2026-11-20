@@ -426,6 +426,8 @@ class ServerCapabilities:
     lock_files: tuple[str, ...] = ()
     env_vars: tuple[EnvVar, ...] = ()
     python_requires: str = ">=3.11"
+    # Optional server features that were switched on (for example "jwt-auth").
+    features: frozenset[str] = frozenset()
 
     @property
     def secret_env_vars(self) -> tuple[EnvVar, ...]:
@@ -442,6 +444,8 @@ class GenerateContext:
     architecture: str = "python-mcp"
     language: str = "python"
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
+    # Optional server features the deployment needs (for example "jwt-auth").
+    server_features: frozenset[str] = frozenset()
     security: SecurityConfig = field(default_factory=SecurityConfig)
     agent_rules: AgentRulesBundle = field(default_factory=AgentRulesBundle)
     package_name: str = "generated_mcp"

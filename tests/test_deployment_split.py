@@ -193,6 +193,9 @@ class _NeedsWebsocket:
     def validate(self, config: DeploymentConfig) -> None:
         pass
 
+    def server_features(self, config: DeploymentConfig) -> frozenset[str]:
+        return frozenset()
+
     def generate(self, ctx: GenerateContext, caps: ServerCapabilities) -> FileTree:
         raise AssertionError("must not run when the server lacks a required transport")
 

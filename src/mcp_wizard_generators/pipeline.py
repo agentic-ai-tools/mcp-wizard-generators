@@ -115,6 +115,13 @@ def generate(
     server = reg.server(architecture, language)
     deploy = reg.deployment(deployment.target)
     check_deployment(deploy, deployment)
+    features = deploy.server_features(deployment)
+    unsupported = features - server.features
+    if unsupported:
+        raise ValueError(
+            f"deployment {deploy.key!r} needs server feature(s) {sorted(unsupported)}, which "
+            f"the {server.key!r} server does not have"
+        )
 
     ir_model = ir if isinstance(ir, IntermediateRep) else IntermediateRep.from_dict(ir)
     if selected_operation_ids is None:
@@ -147,6 +154,7 @@ def generate(
         architecture=server.key,
         language=language,
         deployment=deployment,
+        server_features=features,
         security=security or SecurityConfig(),
         agent_rules=rules,
         package_name=package_name,

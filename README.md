@@ -15,9 +15,11 @@ This package is a **library + CLI**. It does **not** run HTTP servers or workers
 Every generation combines two independent choices (design ADR-026):
 
 - **Server architecture:** `python-mcp` — a runnable MCP server on the official Python SDK.
-- **Deployment target:** `local` (stdio + Cursor config, the default). Docker and AWS Bedrock
-  AgentCore targets, with Terraform, GitHub Actions, scripts and `DEPLOY.md`, are in progress
-  for 0.6.0.
+- **Deployment target:** `local` (stdio + Cursor config, the default) or `docker` (pinned,
+  hash-locked, non-root image serving streamable HTTP; compose publishes on `127.0.0.1`).
+  With `--jwt-discovery-url` plus an audience, client or scope, the docker server checks
+  bearer tokens itself (`auth.py`, any OIDC provider). AWS Bedrock AgentCore targets, with
+  Terraform, GitHub Actions, scripts and `DEPLOY.md`, are in progress for 0.6.0.
 
 ## Community
 
@@ -48,7 +50,7 @@ src/mcp_wizard_generators/
   cli.py                 # mcp-wizard-gen / python -m mcp_wizard_generators
   packaging/             # zip helper for Artifact Service
   plugins/python_mcp/    # python-mcp server architecture
-  plugins/deploy/        # Deployment targets layered on a server tree (local today)
+  plugins/deploy/        # Deployment targets layered on a server tree (local, docker)
   rules/                 # Cursor + Anthropic hooks; originals copied into the artifact
 tests/
   fixtures/              # tiny pets OpenAPI + IR

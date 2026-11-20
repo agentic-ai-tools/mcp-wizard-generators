@@ -96,4 +96,32 @@ def load_transport_config(env: Mapping[str, str] | None = None) -> TransportConf
     return TransportConfig(transport, host, port, path, auth, allowed)
 '''
 
-__all__ = ["TRANSPORT_MODULE"]
+_PLATFORM_ONLY = """# none: nothing checks callers, so only loopback is allowed.
+# platform: a gateway in front of the server (for example AWS Bedrock AgentCore's
+# JWT authorizer) authenticates every request before it arrives.
+AUTH_MODES = ("none", "platform")
+"""
+_WITH_JWT = """# none: nothing checks callers, so only loopback is allowed.
+# platform: a gateway in front of the server (for example AWS Bedrock AgentCore's
+# JWT authorizer) authenticates every request before it arrives.
+# jwt: this server checks a bearer token on every request (auth.py, MCP_JWT_*).
+AUTH_MODES = ("none", "platform", "jwt")
+"""
+_JWT_NOT_BUILT_IN = """    if auth == "jwt":
+        raise TransportConfigError(
+            "MCP_AUTH=jwt is not built into this server. Regenerate it with the docker "
+            "deployment, or put it behind a gateway that checks tokens and set MCP_AUTH=platform"
+        )
+"""
+
+
+def transport_module(*, jwt: bool = False) -> str:
+    """``transport.py``; with ``jwt`` the server checks tokens itself (``MCP_AUTH=jwt``)."""
+    if not jwt:
+        return TRANSPORT_MODULE
+    text = TRANSPORT_MODULE.replace(_PLATFORM_ONLY, _WITH_JWT).replace(_JWT_NOT_BUILT_IN, "")
+    assert text != TRANSPORT_MODULE
+    return text
+
+
+__all__ = ["TRANSPORT_MODULE", "transport_module"]
