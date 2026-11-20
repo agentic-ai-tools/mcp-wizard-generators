@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from mcp_wizard_generators.models import DeploymentConfig, InboundAuthConfig, IntermediateRep
 from mcp_wizard_generators.pipeline import generate
@@ -25,7 +26,6 @@ SCRIPTS = [
 # Linters for the generated files, run through their official images.
 ACTIONLINT_IMAGE = "rhysd/actionlint:1.7.12"
 SHELLCHECK_IMAGE = "koalaman/shellcheck:v0.11.0"
-yaml = pytest.importorskip("yaml")
 
 
 def _tree(deployment: DeploymentConfig):
