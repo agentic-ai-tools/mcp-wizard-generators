@@ -1,4 +1,4 @@
-"""Install a generated MCP project and call it over stdio.
+"""Install a generated MCP project and call it over stdio or streamable HTTP.
 
 Used by end-to-end tests. Not a public library API. The MCP client runs in the
 test process; only the generated server runs in the fresh virtualenv.
@@ -9,9 +9,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -143,6 +145,62 @@ def invoke_stdio(
     still apply underneath that map.
     """
     return asyncio.run(_invoke_stdio(python, args, env, calls))
+
+
+def invoke_http(
+    python: Path,
+    args: list[str],
+    env: dict[str, str],
+    calls: list[ToolCall],
+) -> InvokeResult:
+    """Start the server with ``MCP_TRANSPORT=streamable-http`` on a free loopback port and
+    issue ``initialize``, ``list_tools`` and ``call_tool`` over HTTP (design ADR-026)."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+    merged = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    merged.update(env, MCP_TRANSPORT="streamable-http", MCP_PORT=str(port))
+    server = subprocess.Popen(
+        [str(python), *args],
+        env=merged,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + _SESSION_TIMEOUT_SECONDS
+        while True:
+            if server.poll() is not None:
+                raise RuntimeError(f"server exited: {server.communicate()[1]}")
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise RuntimeError("server did not start listening") from None
+                time.sleep(0.1)
+        return asyncio.run(_invoke_http(f"http://127.0.0.1:{port}/mcp", calls))
+    finally:
+        server.terminate()
+        try:
+            server.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.communicate()
+
+
+async def _invoke_http(url: str, calls: list[ToolCall]) -> InvokeResult:
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    async with streamable_http_client(url) as streams:
+        async with ClientSession(
+            streams[0], streams[1], read_timeout_seconds=_SESSION_TIMEOUT_SECONDS
+        ) as session:
+            await session.initialize()
+            listed = await session.list_tools()
+            results = [await session.call_tool(call.name, call.arguments) for call in calls]
+            return InvokeResult(tool_names=[tool.name for tool in listed.tools], calls=results)
 
 
 def _run(cmd: list[str], *, timeout: int) -> None:

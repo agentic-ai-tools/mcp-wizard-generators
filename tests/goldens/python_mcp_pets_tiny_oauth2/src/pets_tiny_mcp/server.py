@@ -1,6 +1,7 @@
-"""MCP stdio server — official Python SDK MCPServer (mcp 2.x).
+"""MCP server — official Python SDK MCPServer (mcp 2.x).
 
-Exits with a clear message when API_BASE_URL or the auth settings are wrong.
+Speaks stdio by default, or streamable HTTP (see transport.py). Exits with a
+clear message when API_BASE_URL, the auth or the transport settings are wrong.
 """
 
 from __future__ import annotations
@@ -10,9 +11,11 @@ from typing import Annotated
 from urllib.parse import quote
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field, JsonValue
 
 from pets_tiny_mcp.client import ConfigError, check_config, request
+from pets_tiny_mcp.transport import TransportConfigError, load_transport_config
 
 mcp = MCPServer("Pets Tiny API")
 
@@ -41,10 +44,31 @@ def showpetbyid(
 def main() -> None:
     try:
         check_config()
-    except ConfigError as exc:
+        transport = load_transport_config()
+    except (ConfigError, TransportConfigError) as exc:
         sys.stderr.write(f"Cannot start: {exc}\n")
         raise SystemExit(2) from None
-    mcp.run(transport="stdio")
+    if transport.transport == "stdio":
+        mcp.run(transport="stdio")
+        return
+    security = None
+    if transport.allowed_hosts:
+        # Answer only these Host headers (DNS-rebinding protection).
+        security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=list(transport.allowed_hosts),
+        )
+    sys.stderr.write(
+        f"MCP server on {transport.url} (streamable HTTP, auth: {transport.auth})\n"
+    )
+    mcp.run(
+        "streamable-http",
+        host=transport.host,
+        port=transport.port,
+        streamable_http_path=transport.path,
+        stateless_http=True,
+        transport_security=security,
+    )
 
 
 if __name__ == "__main__":

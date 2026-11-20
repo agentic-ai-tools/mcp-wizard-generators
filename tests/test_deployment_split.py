@@ -181,10 +181,10 @@ def test_local_deployment_rejects_options_it_cannot_honor() -> None:
         )
 
 
-class _NeedsHttp:
+class _NeedsWebsocket:
     key = "local"
-    display_name = "needs http"
-    requires = frozenset({"streamable-http"})
+    display_name = "needs websocket"
+    requires = frozenset({"websocket"})
     iac_options = frozenset({"none"})
     ci_options = frozenset({"none"})
     supports_scripts = False
@@ -197,7 +197,7 @@ class _NeedsHttp:
         raise AssertionError("must not run when the server lacks a required transport")
 
 
-class _AddsFile(_NeedsHttp):
+class _AddsFile(_NeedsWebsocket):
     requires = frozenset({"stdio"})
     seen: list[ServerCapabilities] = []
 
@@ -214,8 +214,8 @@ def _registry_with(deployment) -> GeneratorRegistry:
 
 
 def test_missing_transport_is_a_clear_error() -> None:
-    with pytest.raises(ValueError, match="streamable-http"):
-        _files(registry=_registry_with(_NeedsHttp()))
+    with pytest.raises(ValueError, match="websocket"):
+        _files(registry=_registry_with(_NeedsWebsocket()))
 
 
 def test_deployment_reads_capabilities_and_adds_files() -> None:
@@ -224,7 +224,7 @@ def test_deployment_reads_capabilities_and_adds_files() -> None:
     assert files["deploy/NOTE.md"] == "pets_tiny_mcp.server:main\n"
     caps = plugin.seen[-1]
     assert caps.architecture == "python-mcp"
-    assert caps.transports == frozenset({"stdio"})
+    assert caps.transports == frozenset({"stdio", "streamable-http"})
     assert caps.lock_files == ("requirements.lock",)
     names = {v.name for v in caps.env_vars}
     assert "API_BASE_URL" in names

@@ -32,6 +32,7 @@ TEST_FILES = [
     "tests/test_http_errors.py",
     "tests/test_redaction.py",
     "tests/test_tools.py",
+    "tests/test_transport.py",
 ]
 
 CONSTRAINED = {

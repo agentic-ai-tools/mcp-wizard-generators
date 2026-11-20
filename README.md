@@ -34,7 +34,7 @@ Generated servers use the **official MCP Python SDK** (`mcp` on PyPI) **2.x**:
 |----------|------------------|--------|
 | 2.x (pinned) | **MCPServer** | `from mcp.server.mcpserver import MCPServer` |
 
-Fresh zips pin `mcp>=2.0.0,<3` and import only `MCPServer`; mcp 1.x is not supported. Transport is **stdio** for Cursor local MCP. Upstream HTTP calls use **httpx** against `API_BASE_URL`. Generated READMEs include a short OS matrix for venv activate (`bin` vs `Scripts`, including Git Bash on Windows).
+Fresh zips pin `mcp>=2.0.0,<3` and import only `MCPServer`; mcp 1.x is not supported. Transport is **stdio** by default (Cursor local MCP); every server can also run **streamable HTTP** (`MCP_TRANSPORT=streamable-http`, stateless, `127.0.0.1:8000/mcp` by default, loopback-only unless `MCP_AUTH=platform`), and `python -m <pkg>.verify --url` checks a running server. Upstream HTTP calls use **httpx** against `API_BASE_URL`. Generated READMEs include a short OS matrix for venv activate (`bin` vs `Scripts`, including Git Bash on Windows).
 
 ## Layout
 
@@ -244,9 +244,10 @@ plugin was a placeholder).
 | `.cursor/mcp.json` | Cursor MCP snippet (`command`/`args`/`env`) |
 | `src/<pkg>/server.py` | MCPServer tools (1:1 with ops), typed with `Annotated[..., Field(...)]` |
 | `src/<pkg>/client.py` | httpx → upstream API, applying the configured auth; config checks, size limit, redacted errors |
-| `src/<pkg>/__main__.py` | `python -m <pkg>` stdio entry |
-| `src/<pkg>/verify.py` | `python -m <pkg>.verify` — tool count and metadata (`<dist>-verify` after install) |
-| `tests/` | Offline pytest suite: tools, auth failures, HTTP status handling, redaction |
+| `src/<pkg>/__main__.py` | `python -m <pkg>` entry (stdio, or HTTP via `MCP_TRANSPORT`) |
+| `src/<pkg>/transport.py` | stdio / streamable-HTTP settings from `MCP_*` env vars; refuses a public bind without auth |
+| `src/<pkg>/verify.py` | `python -m <pkg>.verify` — tool count and metadata (`<dist>-verify` after install); `--url` checks a running HTTP server |
+| `tests/` | Offline pytest suite: tools, auth failures, HTTP status handling, redaction, transport settings + a loopback HTTP round trip |
 | `SECURITY-NOTES.md` | Only when selected operations send a secret where it can be logged; how to remove them |
 | `generation-manifest.json` | tools, `findings` and generator metadata |
 

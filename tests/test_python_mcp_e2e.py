@@ -1,4 +1,4 @@
-"""Install a generated local Python MCP server, start it, and call a tool."""
+"""Install a generated local Python MCP server, start it, and call a tool (stdio and HTTP)."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from e2e_harness import (
     UpstreamMock,
     install_more,
     install_project,
+    invoke_http,
     invoke_stdio,
     run_generated_tests,
 )
@@ -63,6 +64,18 @@ def test_generated_server_installs_starts_and_serves_a_tool_call(tmp_path: Path)
     call = invoked.calls[0]
     assert not call.is_error
     assert "Fido" in _result_text(call)
+
+    # The same install over streamable HTTP (design ADR-026).
+    with upstream as base_url:
+        over_http = invoke_http(
+            venv_python,
+            ["-m", PACKAGE],
+            {"API_BASE_URL": base_url},
+            [ToolCall("listpets", {"limit": 1})],
+        )
+    assert sorted(over_http.tool_names) == ["listpets", "showpetbyid"]
+    assert not over_http.calls[0].is_error
+    assert "Fido" in _result_text(over_http.calls[0])
 
     script = venv_python.parent / SCRIPT_NAME
     assert script.is_file()
