@@ -1,6 +1,8 @@
 """Report the tools this generated MCP server exposes.
 
-Run: python -m pets_tiny_mcp.verify
+Run: python -m pets_tiny_mcp.verify             (imports the server in-process)
+     python -m pets_tiny_mcp.verify --url URL   (asks a running server over HTTP;
+                                          bearer token from MCP_BEARER_TOKEN)
 Prints UTF-8 JSON to stdout. Exit 0 when live tool names match the
 tools selected at generation time; exit 1 otherwise.
 Does not call the upstream API.
@@ -8,12 +10,15 @@ Does not call the upstream API.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 EXPECTED = json.loads("{\"package\": \"pets_tiny_mcp\", \"title\": \"Pets Tiny API\", \"version\": \"1.0.0\", \"transport\": \"stdio\", \"authMode\": \"api_key\", \"tools\": [{\"name\": \"listpets\", \"operationId\": \"listPets\", \"method\": \"GET\", \"path\": \"/pets\"}, {\"name\": \"showpetbyid\", \"operationId\": \"showPetById\", \"method\": \"GET\", \"path\": \"/pets/{petId}\"}]}")
 
@@ -71,6 +76,10 @@ def build_report() -> dict[str, Any]:
     from pets_tiny_mcp.server import mcp
 
     listed = asyncio.run(mcp.list_tools())
+    return _report(listed, EXPECTED["transport"], type(mcp).__name__)
+
+
+def _report(listed: list[Any], transport: str, server_type: str) -> dict[str, Any]:
     by_name = {item["name"]: item for item in EXPECTED["tools"]}
     live: list[dict[str, Any]] = []
     names: list[str] = []
@@ -105,8 +114,8 @@ def build_report() -> dict[str, Any]:
         "package": EXPECTED["package"],
         "title": EXPECTED["title"],
         "version": EXPECTED["version"],
-        "transport": EXPECTED["transport"],
-        "serverType": type(mcp).__name__,
+        "transport": transport,
+        "serverType": server_type,
         "authMode": EXPECTED["authMode"],
         "toolCount": len(names),
         "expectedToolCount": len(expected_names),
@@ -153,7 +162,109 @@ def _fail(error: str, hint: str) -> int:
     return 1
 
 
-def main() -> int:
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+_STATUS_HINTS = {
+    401: (
+        "The server wants a valid bearer token: set MCP_BEARER_TOKEN to an access "
+        "token from the identity provider the deployment trusts."
+    ),
+    403: (
+        "The token was read but not accepted: check that its audience, client id and "
+        "scopes match the values the deployment allows."
+    ),
+    404: "No MCP endpoint at this URL: check the path (the default is /mcp).",
+}
+
+
+def _check_url(url: str, token: str) -> str | None:
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return "--url must be an http or https URL with a host"
+    if parts.username or parts.password:
+        return "--url must not contain a user name or password; put a token in MCP_BEARER_TOKEN"
+    if token and parts.scheme == "http" and parts.hostname not in _LOOPBACK:
+        return f"refusing to send MCP_BEARER_TOKEN over plain http to {parts.hostname}; use https"
+    return None
+
+
+async def _remote_tools(url: str, token: str, statuses: list[int]) -> list[Any]:
+    import httpx2
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    async def record(response: Any) -> None:
+        statuses.append(response.status_code)
+
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    async with httpx2.AsyncClient(
+        headers=headers, timeout=httpx2.Timeout(30.0), event_hooks={"response": [record]}
+    ) as http:
+        async with streamable_http_client(url, http_client=http) as streams:
+            async with ClientSession(streams[0], streams[1]) as session:
+                await session.initialize()
+                return list((await session.list_tools()).tools)
+
+
+def _leaves(exc: BaseException) -> list[BaseException]:
+    nested = getattr(exc, "exceptions", None)
+    if nested:
+        return [leaf for sub in nested for leaf in _leaves(sub)]
+    return [exc]
+
+
+def _explain_remote(exc: BaseException, statuses: list[int]) -> tuple[str, str]:
+    for status in reversed(statuses):
+        if status in _STATUS_HINTS:
+            return f"the server answered HTTP {status}", _STATUS_HINTS[status]
+    leaves = _leaves(exc)
+    names = {type(leaf).__name__ for leaf in leaves}
+    if isinstance(exc, TimeoutError) or any("Timeout" in name for name in names):
+        return "timed out", "The server did not answer in time: check the URL and that it has started."
+    if "ConnectError" in names:
+        leaf = next(leaf for leaf in leaves if type(leaf).__name__ == "ConnectError")
+        return (
+            f"cannot connect: {leaf}",
+            "Check that the server is running and that the URL (host, port, path) and "
+            "its TLS certificate are right.",
+        )
+    leaf = leaves[0]
+    return (
+        f"remote check failed: {type(leaf).__name__}: {leaf}",
+        "Check that the URL is this server's MCP streamable-HTTP endpoint.",
+    )
+
+
+def _main_remote(url: str) -> int:
+    token = os.environ.get("MCP_BEARER_TOKEN", "").strip()
+    problem = _check_url(url, token)
+    if problem:
+        return _fail(problem, "Example: python -m pets_tiny_mcp.verify --url https://mcp.example.com/mcp")
+    statuses: list[int] = []
+    try:
+        listed = asyncio.run(asyncio.wait_for(_remote_tools(url, token, statuses), 120))
+    except ModuleNotFoundError as exc:
+        return _fail(f"cannot import {exc.name or 'a module'}", _INSTALL)
+    except Exception as exc:  # the MCP client wraps failures in exception groups
+        error, hint = _explain_remote(exc, statuses)
+        return _fail(error, hint)
+    report = _report(listed, "streamable-http", "remote")
+    report["url"] = url
+    _write_json(report)
+    return 0 if report["ok"] else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m pets_tiny_mcp.verify",
+        description="Report the tools this MCP server exposes.",
+    )
+    parser.add_argument(
+        "--url",
+        help="check a running server over streamable HTTP (token from MCP_BEARER_TOKEN)",
+    )
+    args = parser.parse_args(argv)
+    if args.url:
+        return _main_remote(args.url)
     try:
         report = build_report()
     except ModuleNotFoundError as exc:

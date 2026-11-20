@@ -29,12 +29,14 @@ EXPECTED_ZIP_MEMBERS = [
     "pets-tiny-mcp/src/pets_tiny_mcp/__main__.py",
     "pets-tiny-mcp/src/pets_tiny_mcp/client.py",
     "pets-tiny-mcp/src/pets_tiny_mcp/server.py",
+    "pets-tiny-mcp/src/pets_tiny_mcp/transport.py",
     "pets-tiny-mcp/src/pets_tiny_mcp/verify.py",
     "pets-tiny-mcp/tests/conftest.py",
     "pets-tiny-mcp/tests/test_auth.py",
     "pets-tiny-mcp/tests/test_http_errors.py",
     "pets-tiny-mcp/tests/test_redaction.py",
     "pets-tiny-mcp/tests/test_tools.py",
+    "pets-tiny-mcp/tests/test_transport.py",
 ]
 
 

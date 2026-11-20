@@ -29,7 +29,11 @@ from mcp_wizard_generators.models import (
     ToolMapping,
 )
 from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
-from mcp_wizard_generators.plugins.python_mcp import client_template, tests_template
+from mcp_wizard_generators.plugins.python_mcp import (
+    client_template,
+    tests_template,
+    transport_template,
+)
 from mcp_wizard_generators.plugins.python_mcp.annotations import annotation as _annotation
 
 
@@ -59,6 +63,9 @@ _RESERVED_MODULE_NAMES = frozenset(
         "MCPServer",
         "check_config",
         "ConfigError",
+        "load_transport_config",
+        "TransportConfigError",
+        "TransportSecuritySettings",
         *_TYPING_NAMES,
     }
 )
@@ -96,7 +103,7 @@ class PythonMcpPlugin:
     key = "python-mcp"
     language = "python"
     display_name = "Python MCP server"
-    transports = frozenset({"stdio"})
+    transports = frozenset({"stdio", "streamable-http"})
 
     def generate(self, ctx: GenerateContext) -> tuple[FileTree, ServerCapabilities]:
         return self._tree(ctx), self._capabilities(ctx)
@@ -133,7 +140,12 @@ class PythonMcpPlugin:
             ]
         found += [
             EnvVar("MAX_RESPONSE_BYTES", "Largest response body the server reads"),
-            EnvVar("MCP_TRANSPORT", "MCP transport"),
+            EnvVar("MCP_TRANSPORT", "stdio (default) or streamable-http"),
+            EnvVar("MCP_HOST", "HTTP listen address (default 127.0.0.1)"),
+            EnvVar("MCP_PORT", "HTTP port (default 8000)"),
+            EnvVar("MCP_PATH", "HTTP endpoint path (default /mcp)"),
+            EnvVar("MCP_AUTH", "none, or platform when a gateway authenticates callers"),
+            EnvVar("MCP_ALLOWED_HOSTS", "Comma-separated Host values (DNS-rebinding protection)"),
         ]
         return tuple(found)
 
@@ -151,6 +163,7 @@ class PythonMcpPlugin:
             FileEntry(f"src/{pkg}/__init__.py", self._init(ctx)),
             FileEntry(f"src/{pkg}/__main__.py", self._main_module(pkg)),
             FileEntry(f"src/{pkg}/server.py", self._server(pkg, ctx, tools)),
+            FileEntry(f"src/{pkg}/transport.py", transport_template.TRANSPORT_MODULE),
             FileEntry(f"src/{pkg}/client.py", self._http_client(ctx)),
             FileEntry(f"src/{pkg}/verify.py", self._verify_module(pkg, ctx, tools)),
             FileEntry("generation-manifest.json", json.dumps(self._manifest(ctx), indent=2) + "\n"),
@@ -307,8 +320,9 @@ class PythonMcpPlugin:
                 "",
                 "This project uses the **official MCP Python SDK** (`mcp` on PyPI) **2.x**",
                 "high-level **MCPServer** API (`from mcp.server.mcpserver import MCPServer`).",
-                "Dependencies pin `mcp>=2.0.0,<3`; mcp 1.x is not supported. Tools speak",
-                "**stdio**, which Cursor expects for local MCP servers.",
+                "Dependencies pin `mcp>=2.0.0,<3`; mcp 1.x is not supported. The server",
+                "speaks **stdio** by default, which Cursor expects for local MCP servers, and",
+                "**streamable HTTP** when you ask for it (see *Run over HTTP*).",
                 "",
                 "## Tools (1:1 with selected OpenAPI operations)",
                 "",
@@ -353,6 +367,7 @@ class PythonMcpPlugin:
                 "Upstream API base URL defaults from the OpenAPI servers list",
                 f"(`{one_line(base)}`). Override with `API_BASE_URL`.",
                 "",
+                *self._readme_http(pkg),
                 *self._readme_auth(ctx),
                 *self._readme_security(ctx),
                 "## Errors and limits",
@@ -379,6 +394,14 @@ class PythonMcpPlugin:
                 "It prints UTF-8 JSON, including `toolCount`, and exits 0 when the exposed tool",
                 "names match. After `pip install`, "
                 f"`{pkg.replace('_', '-')}-verify` runs the same check.",
+                "",
+                "To check a server that is already running over HTTP (local or deployed), pass",
+                "its URL. A bearer token, when the server needs one, is read from",
+                "`MCP_BEARER_TOKEN` only, so it never lands in your shell history:",
+                "",
+                "```bash",
+                f"python -m {pkg}.verify --url https://mcp.example.com/mcp",
+                "```",
                 "",
                 "## Tests",
                 "",
@@ -411,7 +434,8 @@ class PythonMcpPlugin:
                 ".cursor/mcp.json",
                 f"src/{pkg}/",
                 f"  __main__.py      # python -m {pkg}",
-                "  server.py        # MCP tools + stdio entry",
+                "  server.py        # MCP tools + entry point",
+                "  transport.py     # stdio or streamable HTTP (MCP_* env vars)",
                 "  client.py        # httpx client → API_BASE_URL",
                 f"  verify.py        # python -m {pkg}.verify",
                 "tests/            # python -m pytest (no network)",
@@ -420,6 +444,34 @@ class PythonMcpPlugin:
                 "",
             ]
         )
+
+    @staticmethod
+    def _readme_http(pkg: str) -> list[str]:
+        return [
+            "## Run over HTTP",
+            "",
+            "The same server can listen on streamable HTTP instead of stdio, for MCP",
+            "clients that connect by URL. It is stateless and needs no extra packages.",
+            "Set `API_BASE_URL` (and any auth variables) in the shell first: the server",
+            "reads its environment, not the `.env` file.",
+            "",
+            "```bash",
+            f"MCP_TRANSPORT=streamable-http python -m {pkg}",
+            f"python -m {pkg}.verify --url http://127.0.0.1:8000/mcp   # in a second shell",
+            "```",
+            "",
+            "```powershell",
+            '$env:MCP_TRANSPORT = "streamable-http"',
+            f"python -m {pkg}",
+            "```",
+            "",
+            "`MCP_HOST` (default `127.0.0.1`), `MCP_PORT` (`8000`) and `MCP_PATH` (`/mcp`)",
+            "change where it listens. The server **refuses to listen beyond this machine**",
+            "unless something checks callers: set `MCP_AUTH=platform` only when a gateway in",
+            "front of it (for example AWS Bedrock AgentCore) authenticates every request.",
+            "`MCP_ALLOWED_HOSTS` (comma-separated) limits the Host headers it answers.",
+            "",
+        ]
 
     def _readme_security(self, ctx: GenerateContext) -> list[str]:
         if not self._tool_findings(ctx.tool_map.tools) and not self._auth_notes(ctx):
@@ -539,6 +591,17 @@ class PythonMcpPlugin:
         lines.append("# Largest response body the server reads (bytes):")
         lines.append("# MAX_RESPONSE_BYTES=1048576")
         lines.append("MCP_TRANSPORT=stdio")
+        lines += [
+            "# Streamable HTTP instead of stdio (README: Run over HTTP):",
+            "# MCP_TRANSPORT=streamable-http",
+            "# MCP_HOST=127.0.0.1",
+            "# MCP_PORT=8000",
+            "# MCP_PATH=/mcp",
+            "# Non-loopback MCP_HOST needs platform: a gateway such as AgentCore checks tokens.",
+            "# MCP_AUTH=none",
+            "# Comma-separated Host values to answer (DNS-rebinding protection):",
+            "# MCP_ALLOWED_HOSTS=",
+        ]
         return "\n".join(lines) + "\n"
 
     def _cursor_mcp_json(self, pkg: str, ctx: GenerateContext) -> str:
@@ -596,7 +659,9 @@ class PythonMcpPlugin:
                 '''\
                 """Report the tools this generated MCP server exposes.
 
-                Run: python -m __PKG__.verify
+                Run: python -m __PKG__.verify             (imports the server in-process)
+                     python -m __PKG__.verify --url URL   (asks a running server over HTTP;
+                                                          bearer token from MCP_BEARER_TOKEN)
                 Prints UTF-8 JSON to stdout. Exit 0 when live tool names match the
                 tools selected at generation time; exit 1 otherwise.
                 Does not call the upstream API.
@@ -604,12 +669,15 @@ class PythonMcpPlugin:
 
                 from __future__ import annotations
 
+                import argparse
                 import asyncio
                 import json
+                import os
                 import sys
                 from collections import Counter
                 from pathlib import Path
                 from typing import Any
+                from urllib.parse import urlsplit
 
                 EXPECTED = json.loads(__EXPECTED__)
 
@@ -667,6 +735,10 @@ class PythonMcpPlugin:
                     from __PKG__.server import mcp
 
                     listed = asyncio.run(mcp.list_tools())
+                    return _report(listed, EXPECTED["transport"], type(mcp).__name__)
+
+
+                def _report(listed: list[Any], transport: str, server_type: str) -> dict[str, Any]:
                     by_name = {item["name"]: item for item in EXPECTED["tools"]}
                     live: list[dict[str, Any]] = []
                     names: list[str] = []
@@ -701,8 +773,8 @@ class PythonMcpPlugin:
                         "package": EXPECTED["package"],
                         "title": EXPECTED["title"],
                         "version": EXPECTED["version"],
-                        "transport": EXPECTED["transport"],
-                        "serverType": type(mcp).__name__,
+                        "transport": transport,
+                        "serverType": server_type,
                         "authMode": EXPECTED["authMode"],
                         "toolCount": len(names),
                         "expectedToolCount": len(expected_names),
@@ -749,7 +821,109 @@ class PythonMcpPlugin:
                     return 1
 
 
-                def main() -> int:
+                _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+                _STATUS_HINTS = {
+                    401: (
+                        "The server wants a valid bearer token: set MCP_BEARER_TOKEN to an access "
+                        "token from the identity provider the deployment trusts."
+                    ),
+                    403: (
+                        "The token was read but not accepted: check that its audience, client id and "
+                        "scopes match the values the deployment allows."
+                    ),
+                    404: "No MCP endpoint at this URL: check the path (the default is /mcp).",
+                }
+
+
+                def _check_url(url: str, token: str) -> str | None:
+                    parts = urlsplit(url)
+                    if parts.scheme not in ("http", "https") or not parts.hostname:
+                        return "--url must be an http or https URL with a host"
+                    if parts.username or parts.password:
+                        return "--url must not contain a user name or password; put a token in MCP_BEARER_TOKEN"
+                    if token and parts.scheme == "http" and parts.hostname not in _LOOPBACK:
+                        return f"refusing to send MCP_BEARER_TOKEN over plain http to {parts.hostname}; use https"
+                    return None
+
+
+                async def _remote_tools(url: str, token: str, statuses: list[int]) -> list[Any]:
+                    import httpx2
+                    from mcp import ClientSession
+                    from mcp.client.streamable_http import streamable_http_client
+
+                    async def record(response: Any) -> None:
+                        statuses.append(response.status_code)
+
+                    headers = {"Authorization": f"Bearer {token}"} if token else {}
+                    async with httpx2.AsyncClient(
+                        headers=headers, timeout=httpx2.Timeout(30.0), event_hooks={"response": [record]}
+                    ) as http:
+                        async with streamable_http_client(url, http_client=http) as streams:
+                            async with ClientSession(streams[0], streams[1]) as session:
+                                await session.initialize()
+                                return list((await session.list_tools()).tools)
+
+
+                def _leaves(exc: BaseException) -> list[BaseException]:
+                    nested = getattr(exc, "exceptions", None)
+                    if nested:
+                        return [leaf for sub in nested for leaf in _leaves(sub)]
+                    return [exc]
+
+
+                def _explain_remote(exc: BaseException, statuses: list[int]) -> tuple[str, str]:
+                    for status in reversed(statuses):
+                        if status in _STATUS_HINTS:
+                            return f"the server answered HTTP {status}", _STATUS_HINTS[status]
+                    leaves = _leaves(exc)
+                    names = {type(leaf).__name__ for leaf in leaves}
+                    if isinstance(exc, TimeoutError) or any("Timeout" in name for name in names):
+                        return "timed out", "The server did not answer in time: check the URL and that it has started."
+                    if "ConnectError" in names:
+                        leaf = next(leaf for leaf in leaves if type(leaf).__name__ == "ConnectError")
+                        return (
+                            f"cannot connect: {leaf}",
+                            "Check that the server is running and that the URL (host, port, path) and "
+                            "its TLS certificate are right.",
+                        )
+                    leaf = leaves[0]
+                    return (
+                        f"remote check failed: {type(leaf).__name__}: {leaf}",
+                        "Check that the URL is this server's MCP streamable-HTTP endpoint.",
+                    )
+
+
+                def _main_remote(url: str) -> int:
+                    token = os.environ.get("MCP_BEARER_TOKEN", "").strip()
+                    problem = _check_url(url, token)
+                    if problem:
+                        return _fail(problem, "Example: python -m __PKG__.verify --url https://mcp.example.com/mcp")
+                    statuses: list[int] = []
+                    try:
+                        listed = asyncio.run(asyncio.wait_for(_remote_tools(url, token, statuses), 120))
+                    except ModuleNotFoundError as exc:
+                        return _fail(f"cannot import {exc.name or 'a module'}", _INSTALL)
+                    except Exception as exc:  # the MCP client wraps failures in exception groups
+                        error, hint = _explain_remote(exc, statuses)
+                        return _fail(error, hint)
+                    report = _report(listed, "streamable-http", "remote")
+                    report["url"] = url
+                    _write_json(report)
+                    return 0 if report["ok"] else 1
+
+
+                def main(argv: list[str] | None = None) -> int:
+                    parser = argparse.ArgumentParser(
+                        prog="python -m __PKG__.verify",
+                        description="Report the tools this MCP server exposes.",
+                    )
+                    parser.add_argument(
+                        "--url",
+                        help="check a running server over streamable HTTP (token from MCP_BEARER_TOKEN)",
+                    )
+                    args = parser.parse_args(argv)
+                    if args.url:
+                        return _main_remote(args.url)
                     try:
                         report = build_report()
                     except ModuleNotFoundError as exc:
@@ -781,7 +955,7 @@ class PythonMcpPlugin:
     def _main_module(self, pkg: str) -> str:
         return dedent(
             f"""\
-            \"\"\"Allow `python -m {pkg}` to start the MCP stdio server.\"\"\"
+            \"\"\"Allow `python -m {pkg}` to start the MCP server.\"\"\"
 
             from {pkg}.server import main
 
@@ -978,9 +1152,10 @@ class PythonMcpPlugin:
         return (
             dedent(
                 f'''\
-                """MCP stdio server — official Python SDK MCPServer (mcp 2.x).
+                """MCP server — official Python SDK MCPServer (mcp 2.x).
 
-                Exits with a clear message when API_BASE_URL or the auth settings are wrong.
+                Speaks stdio by default, or streamable HTTP (see transport.py). Exits with a
+                clear message when API_BASE_URL, the auth or the transport settings are wrong.
                 """
 
                 from __future__ import annotations
@@ -988,6 +1163,7 @@ class PythonMcpPlugin:
                 {imports}
 
                 from {pkg}.client import ConfigError, check_config, request
+                from {pkg}.transport import TransportConfigError, load_transport_config
 
                 mcp = MCPServer({title_literal})
 
@@ -1002,10 +1178,31 @@ class PythonMcpPlugin:
                 def main() -> None:
                     try:
                         check_config()
-                    except ConfigError as exc:
+                        transport = load_transport_config()
+                    except (ConfigError, TransportConfigError) as exc:
                         sys.stderr.write(f"Cannot start: {exc}\\n")
                         raise SystemExit(2) from None
-                    mcp.run(transport="stdio")
+                    if transport.transport == "stdio":
+                        mcp.run(transport="stdio")
+                        return
+                    security = None
+                    if transport.allowed_hosts:
+                        # Answer only these Host headers (DNS-rebinding protection).
+                        security = TransportSecuritySettings(
+                            enable_dns_rebinding_protection=True,
+                            allowed_hosts=list(transport.allowed_hosts),
+                        )
+                    sys.stderr.write(
+                        f"MCP server on {transport.url} (streamable HTTP, auth: {transport.auth})\\n"
+                    )
+                    mcp.run(
+                        "streamable-http",
+                        host=transport.host,
+                        port=transport.port,
+                        streamable_http_path=transport.path,
+                        stateless_http=True,
+                        transport_security=security,
+                    )
 
 
                 if __name__ == "__main__":
@@ -1028,7 +1225,10 @@ class PythonMcpPlugin:
             stdlib.append(f"from typing import {', '.join(typing_names)}")
         if "quote(" in tool_fns:
             stdlib.append("from urllib.parse import quote")
-        third_party = ["from mcp.server.mcpserver import MCPServer"]
+        third_party = [
+            "from mcp.server.mcpserver import MCPServer",
+            "from mcp.server.transport_security import TransportSecuritySettings",
+        ]
         pydantic_names = [n for n in ("Field", "JsonValue") if n in tool_fns]
         if pydantic_names:
             third_party.append(f"from pydantic import {', '.join(pydantic_names)}")

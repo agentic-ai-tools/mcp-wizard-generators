@@ -236,7 +236,8 @@ class SecurityConfig:
         """Build from the Experience API ``SecurityConfig`` JSON (camelCase)."""
         if config.get("mcpAuth"):
             raise ValueError(
-                "mcpAuth is not supported: generated MCP servers are stdio-only in MVP-1"
+                "mcpAuth is not supported here: MCP endpoint auth is configured on the "
+                "deployment (design ADR-026), not in SecurityConfig"
             )
         auth_mode = str(config.get("authMode") or "none")
         api_key = config.get("apiKey") or {}

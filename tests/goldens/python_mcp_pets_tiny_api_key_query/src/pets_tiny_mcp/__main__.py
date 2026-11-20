@@ -1,4 +1,4 @@
-"""Allow `python -m pets_tiny_mcp` to start the MCP stdio server."""
+"""Allow `python -m pets_tiny_mcp` to start the MCP server."""
 
 from pets_tiny_mcp.server import main
 

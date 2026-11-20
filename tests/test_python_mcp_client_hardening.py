@@ -427,7 +427,7 @@ def _verify_main(mods: dict, monkeypatch, exc: BaseException, capsys) -> tuple[i
         raise exc
 
     monkeypatch.setattr(mods["verify"], "build_report", boom)
-    code = mods["verify"].main()
+    code = mods["verify"].main([])
     return code, json.loads(capsys.readouterr().out)
 
 
@@ -482,13 +482,13 @@ def test_verify_main_does_not_hide_unexpected_errors(project, monkeypatch) -> No
 
     monkeypatch.setattr(mods["verify"], "build_report", boom)
     with pytest.raises(LookupError):
-        mods["verify"].main()
+        mods["verify"].main([])
 
 
 def test_verify_main_still_passes(project, monkeypatch, capsys) -> None:
     mods = project()
     monkeypatch.chdir(mods["root"])
-    assert mods["verify"].main() == 0
+    assert mods["verify"].main([]) == 0
     assert json.loads(capsys.readouterr().out)["ok"] is True
 
 
@@ -539,4 +539,5 @@ def test_server_imports_with_no_tools() -> None:
         "import sys",
         "                ",
         "                from mcp.server.mcpserver import MCPServer",
+        "                from mcp.server.transport_security import TransportSecuritySettings",
     ]
