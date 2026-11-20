@@ -115,6 +115,13 @@ def generate(
     server = reg.server(architecture, language)
     deploy = reg.deployment(deployment.target)
     check_deployment(deploy, deployment)
+    features = deploy.server_features(deployment)
+    unsupported = features - server.features
+    if unsupported:
+        raise ValueError(
+            f"deployment {deploy.key!r} needs server feature(s) {sorted(unsupported)}, which "
+            f"the {server.key!r} server does not have"
+        )
 
     ir_model = ir if isinstance(ir, IntermediateRep) else IntermediateRep.from_dict(ir)
     if selected_operation_ids is None:
@@ -130,11 +137,8 @@ def generate(
         unknown = [op_id for op_id in selected if op_id not in known]
         if unknown:
             raise ValueError("unknown operation id(s) in selection: " + ", ".join(unknown))
+    # Every selected id is known, and build_tool_map returns a tool per operation.
     tool_map = build_tool_map(ir_model, selected, tool_name_overrides)
-    if selected and not tool_map.tools:
-        raise ValueError(
-            "selected_operation_ids produced no tools; check that ids match IR operation ids"
-        )
     rules = agent_rules or AgentRulesBundle()
 
     # Pre-generate rules pass (tool naming constraints, etc.)
@@ -147,6 +151,7 @@ def generate(
         architecture=server.key,
         language=language,
         deployment=deployment,
+        server_features=features,
         security=security or SecurityConfig(),
         agent_rules=rules,
         package_name=package_name,

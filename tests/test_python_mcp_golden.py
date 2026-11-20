@@ -190,3 +190,41 @@ def test_python_mcp_security_goldens(golden: str) -> None:
         assert actual == _normalize(golden_file.read_text(encoding="utf-8")), (
             f"content drift: {golden}/{entry.path}"
         )
+
+
+DOCKER_JWT_GOLDEN = "python_mcp_pets_tiny_docker_jwt"
+
+
+def docker_jwt_result():
+    """The docker deployment with server-side JWT checks (design ADR-026)."""
+    from mcp_wizard_generators.models import DeploymentConfig, InboundAuthConfig
+
+    ir = IntermediateRep.from_dict(json.loads(FIXTURE.read_text(encoding="utf-8")))
+    return generate_python_mcp_result(
+        ir,
+        ["listPets", "showPetById"],
+        package_name="pets_tiny_mcp",
+        deployment=DeploymentConfig(
+            target="docker",
+            inbound_auth=InboundAuthConfig(
+                mode="jwt",
+                discovery_url="https://login.example.com/tenant/.well-known/openid-configuration",
+                allowed_audiences=("api://pets",),
+            ),
+        ),
+    )
+
+
+def test_python_mcp_docker_jwt_golden() -> None:
+    result = docker_jwt_result()
+    golden_dir = ROOT / "goldens" / DOCKER_JWT_GOLDEN
+    expected_paths = sorted(
+        str(p.relative_to(golden_dir)).replace("\\", "/")
+        for p in golden_dir.rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts
+    )
+    assert result.tree.paths() == expected_paths
+    for entry in result.tree.entries:
+        actual = golden_view(entry.path, _normalize(entry.content))
+        expected = _normalize((golden_dir / entry.path).read_text(encoding="utf-8"))
+        assert actual == expected, f"content drift: {DOCKER_JWT_GOLDEN}/{entry.path}"

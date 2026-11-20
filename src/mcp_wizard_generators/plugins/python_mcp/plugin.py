@@ -30,6 +30,7 @@ from mcp_wizard_generators.models import (
 )
 from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
 from mcp_wizard_generators.plugins.python_mcp import (
+    auth_template,
     client_template,
     tests_template,
     transport_template,
@@ -51,6 +52,13 @@ def _direct_requirements() -> list[str]:
     return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
 
 
+JWT_FEATURE = "jwt-auth"
+
+
+def _jwt(ctx: GenerateContext) -> bool:
+    return JWT_FEATURE in ctx.server_features
+
+
 _TYPING_NAMES = ("Any", "Annotated", "Literal", "Field", "JsonValue", "re")
 _RESERVED_MODULE_NAMES = frozenset(
     {
@@ -66,6 +74,9 @@ _RESERVED_MODULE_NAMES = frozenset(
         "load_transport_config",
         "TransportConfigError",
         "TransportSecuritySettings",
+        "load_jwt_settings",
+        "AuthConfigError",
+        "serve_with_jwt",
         *_TYPING_NAMES,
     }
 )
@@ -104,6 +115,8 @@ class PythonMcpPlugin:
     language = "python"
     display_name = "Python MCP server"
     transports = frozenset({"stdio", "streamable-http"})
+    # jwt-auth: the server checks bearer tokens itself (auth.py); docker turns it on.
+    features = frozenset({JWT_FEATURE})
 
     def generate(self, ctx: GenerateContext) -> tuple[FileTree, ServerCapabilities]:
         return self._tree(ctx), self._capabilities(ctx)
@@ -117,6 +130,7 @@ class PythonMcpPlugin:
             transports=self.transports,
             lock_files=("requirements.lock",),
             env_vars=self._env_vars(ctx),
+            features=ctx.server_features & self.features,
         )
 
     @staticmethod
@@ -147,6 +161,13 @@ class PythonMcpPlugin:
             EnvVar("MCP_AUTH", "none, or platform when a gateway authenticates callers"),
             EnvVar("MCP_ALLOWED_HOSTS", "Comma-separated Host values (DNS-rebinding protection)"),
         ]
+        if _jwt(ctx):
+            found += [
+                EnvVar("MCP_JWT_DISCOVERY_URL", "Identity provider OIDC discovery URL"),
+                EnvVar("MCP_JWT_AUDIENCES", "Allowed token audiences (comma-separated)"),
+                EnvVar("MCP_JWT_CLIENTS", "Allowed client ids (comma-separated)"),
+                EnvVar("MCP_JWT_SCOPES", "Token needs one of these scopes (comma-separated)"),
+            ]
         return tuple(found)
 
     def _tree(self, ctx: GenerateContext) -> FileTree:
@@ -163,11 +184,15 @@ class PythonMcpPlugin:
             FileEntry(f"src/{pkg}/__init__.py", self._init(ctx)),
             FileEntry(f"src/{pkg}/__main__.py", self._main_module(pkg)),
             FileEntry(f"src/{pkg}/server.py", self._server(pkg, ctx, tools)),
-            FileEntry(f"src/{pkg}/transport.py", transport_template.TRANSPORT_MODULE),
+            FileEntry(
+                f"src/{pkg}/transport.py", transport_template.transport_module(jwt=_jwt(ctx))
+            ),
             FileEntry(f"src/{pkg}/client.py", self._http_client(ctx)),
             FileEntry(f"src/{pkg}/verify.py", self._verify_module(pkg, ctx, tools)),
             FileEntry("generation-manifest.json", json.dumps(self._manifest(ctx), indent=2) + "\n"),
         ]
+        if _jwt(ctx):
+            entries.append(FileEntry(f"src/{pkg}/auth.py", auth_template.AUTH_MODULE))
         notes = self._security_notes(ctx)
         if notes:
             entries.append(FileEntry("SECURITY-NOTES.md", notes))
@@ -209,7 +234,16 @@ class PythonMcpPlugin:
             cases.append(case)
             if redaction:
                 sensitive.append(redaction)
-        return tests_template.build(ctx.package_name, ctx.security.auth_mode, cases, sensitive)
+        files = tests_template.build(ctx.package_name, ctx.security.auth_mode, cases, sensitive)
+        if _jwt(ctx):
+            # This server has MCP_AUTH=jwt built in; test_jwt_auth.py covers it.
+            files["tests/test_transport.py"] = files["tests/test_transport.py"].replace(
+                '        ({"MCP_AUTH": "jwt"}, "not built into this server"),\n', ""
+            )
+            files["tests/test_jwt_auth.py"] = auth_template.TEST_JWT_AUTH.replace(
+                "__PKG__", ctx.package_name
+            )
+        return files
 
     @staticmethod
     def _tool_findings(tools: list[ToolMapping]) -> list[tuple[ToolMapping, list[Finding]]]:
@@ -367,7 +401,7 @@ class PythonMcpPlugin:
                 "Upstream API base URL defaults from the OpenAPI servers list",
                 f"(`{one_line(base)}`). Override with `API_BASE_URL`.",
                 "",
-                *self._readme_http(pkg),
+                *self._readme_http(pkg, jwt=_jwt(ctx)),
                 *self._readme_auth(ctx),
                 *self._readme_security(ctx),
                 "## Errors and limits",
@@ -446,7 +480,14 @@ class PythonMcpPlugin:
         )
 
     @staticmethod
-    def _readme_http(pkg: str) -> list[str]:
+    def _readme_http(pkg: str, *, jwt: bool = False) -> list[str]:
+        jwt_lines = [
+            "With `MCP_AUTH=jwt` the server checks a bearer token on every request itself",
+            "(`auth.py`): set `MCP_JWT_DISCOVERY_URL` to your identity provider's OIDC",
+            "discovery URL and at least one of `MCP_JWT_AUDIENCES`, `MCP_JWT_CLIENTS` or",
+            "`MCP_JWT_SCOPES`.",
+            "",
+        ]
         return [
             "## Run over HTTP",
             "",
@@ -471,6 +512,7 @@ class PythonMcpPlugin:
             "front of it (for example AWS Bedrock AgentCore) authenticates every request.",
             "`MCP_ALLOWED_HOSTS` (comma-separated) limits the Host headers it answers.",
             "",
+            *(jwt_lines if jwt else []),
         ]
 
     def _readme_security(self, ctx: GenerateContext) -> list[str]:
@@ -515,6 +557,8 @@ class PythonMcpPlugin:
     def _pyproject(self, pkg: str, ctx: GenerateContext) -> str:
         dist = pkg.replace("_", "-")
         deps = "".join(f"\n              {json.dumps(r)}," for r in _direct_requirements())
+        # auth.py imports PyJWT; requirements.lock already pins it (an mcp dependency).
+        jwt_extra = '\n            jwt = ["PyJWT[crypto]>=2.10,<3"]' if _jwt(ctx) else ""
         return dedent(
             f"""\
             [build-system]
@@ -530,7 +574,7 @@ class PythonMcpPlugin:
             ]
 
             [project.optional-dependencies]
-            test = ["pytest>=8,<10"]
+            test = ["pytest>=8,<10"]{jwt_extra}
 
             [project.scripts]
             {dist} = "{pkg}.server:main"
@@ -602,6 +646,15 @@ class PythonMcpPlugin:
             "# Comma-separated Host values to answer (DNS-rebinding protection):",
             "# MCP_ALLOWED_HOSTS=",
         ]
+        if _jwt(ctx):
+            lines += [
+                "# MCP_AUTH=jwt: this server checks bearer tokens from any OIDC provider.",
+                "# MCP_JWT_DISCOVERY_URL=https://idp.example.com/.well-known/openid-configuration",
+                "# At least one of (comma-separated):",
+                "# MCP_JWT_AUDIENCES=",
+                "# MCP_JWT_CLIENTS=",
+                "# MCP_JWT_SCOPES=",
+            ]
         return "\n".join(lines) + "\n"
 
     def _cursor_mcp_json(self, pkg: str, ctx: GenerateContext) -> str:
@@ -1149,6 +1202,40 @@ class PythonMcpPlugin:
         )
         title_literal = py_str(ctx.ir.title)
         imports = self._server_imports(tool_fns)
+        source = self._server_source(pkg, tool_fns, title_literal, imports)
+        return self._with_jwt(source, pkg) if _jwt(ctx) else source
+
+    @staticmethod
+    def _with_jwt(source: str, pkg: str) -> str:
+        """server.py for MCP_AUTH=jwt: load the token settings at startup, then serve
+        HTTP through auth.serve_with_jwt (bearer check on every request)."""
+        pairs = [
+            (
+                f"from {pkg}.transport import TransportConfigError, load_transport_config\n",
+                f"from {pkg}.auth import AuthConfigError, load_jwt_settings, serve_with_jwt\n"
+                f"from {pkg}.transport import TransportConfigError, load_transport_config\n",
+            ),
+            (
+                "        transport = load_transport_config()\n"
+                "    except (ConfigError, TransportConfigError) as exc:\n",
+                "        transport = load_transport_config()\n"
+                '        jwt_settings = load_jwt_settings() if transport.auth == "jwt" else None\n'
+                "    except (ConfigError, TransportConfigError, AuthConfigError) as exc:\n",
+            ),
+            (
+                '    mcp.run(\n        "streamable-http",\n',
+                "    if jwt_settings is not None:\n"
+                "        serve_with_jwt(mcp, transport, jwt_settings, security)\n"
+                "        return\n"
+                '    mcp.run(\n        "streamable-http",\n',
+            ),
+        ]
+        for old, new in pairs:
+            assert source.count(old) == 1, old
+            source = source.replace(old, new)
+        return source
+
+    def _server_source(self, pkg: str, tool_fns: str, title_literal: str, imports: str) -> str:
         return (
             dedent(
                 f'''\

@@ -26,5 +26,8 @@ class LocalDeployment:
         if config.aws_region:
             raise ValueError("deployment 'local' does not use aws_region")
 
+    def server_features(self, config: DeploymentConfig) -> frozenset[str]:
+        return frozenset()
+
     def generate(self, ctx: GenerateContext, caps: ServerCapabilities) -> FileTree:
         return FileTree(root_name=caps.package_name.replace("_", "-"))
