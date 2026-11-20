@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import urlsplit
 
 from mcp_wizard_generators.paths import safe_tree_path
 
@@ -15,6 +16,17 @@ AUTH_MODES = frozenset({"none", "api_key", "oauth2"})
 SECRETS_STRATEGIES = frozenset({"dotenv_example_only", "env", "secret_manager"})
 # RFC 9110 token characters: safe as an HTTP header name and as a query key.
 _API_KEY_NAME = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}")
+
+# Deployment axis (design ADR-026). The server architecture is chosen separately.
+DEPLOYMENT_TARGETS = ("local", "docker", "agentcore-container", "agentcore-code")
+IAC_OPTIONS = frozenset({"none", "terraform"})
+CI_OPTIONS = frozenset({"none", "github-actions"})
+INBOUND_AUTH_MODES = frozenset({"none", "jwt"})
+# AgentCore's JWT authorizer requires this suffix; every OIDC provider publishes it.
+_DISCOVERY_URL = re.compile(r"https://[^\s/?#@]+(/[^\s?#]*)?/\.well-known/openid-configuration")
+_AWS_REGION = re.compile(r"[a-z]{2}(-[a-z]+)+-\d")
+# Audiences, client ids and scopes end up in Terraform strings and env files.
+_AUTH_VALUE = re.compile(r"[A-Za-z0-9:/._~@+=,-]{1,256}")
 
 
 INTERNAL_SCHEMA_PREFIX = "x-mcp-wizard-"
@@ -136,6 +148,29 @@ class FileTree:
                 return entry
         return None
 
+    def merge(self, other: FileTree, *, append: frozenset[str] = frozenset()) -> FileTree:
+        """A new tree: this tree plus ``other``, keeping this tree's root name.
+
+        A path present in both trees is an error, so a deployment can never silently
+        overwrite server code. Paths listed in ``append`` are the exception: the other
+        tree's content is appended (for example a README section).
+        """
+        entries = list(self.entries)
+        index = {e.path: i for i, e in enumerate(entries)}
+        for entry in other.entries:
+            if entry.path not in index:
+                index[entry.path] = len(entries)
+                entries.append(entry)
+                continue
+            if entry.path not in append:
+                raise ValueError(f"generated path collision: {entry.path!r} is emitted twice")
+            mine = entries[index[entry.path]]
+            joined = mine.content if mine.content.endswith("\n") else mine.content + "\n"
+            entries[index[entry.path]] = FileEntry(
+                entry.path, joined + entry.content, mine.executable or entry.executable
+            )
+        return FileTree(entries=entries, root_name=self.root_name)
+
     def write_to(self, dest_dir: str | Path) -> Path:
         root = Path(dest_dir)
         root.mkdir(parents=True, exist_ok=True)
@@ -246,16 +281,172 @@ class AgentRulesBundle:
     unified_constraints: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class InboundAuthConfig:
+    """Auth on the generated MCP endpoint itself (design ADR-026).
+
+    ``jwt`` means a bearer token from a configurable OIDC identity provider; no
+    provider is hardcoded. ``create_cognito`` asks the deployment to create a
+    Cognito user pool and use it as the provider. None of these values are secrets.
+    """
+
+    mode: str = "none"  # none | jwt
+    discovery_url: str = ""
+    allowed_audiences: tuple[str, ...] = ()
+    allowed_clients: tuple[str, ...] = ()
+    allowed_scopes: tuple[str, ...] = ()
+    create_cognito: bool = False
+
+    def __post_init__(self) -> None:
+        for name in ("allowed_audiences", "allowed_clients", "allowed_scopes"):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
+        self.validate()
+
+    @property
+    def configured(self) -> bool:
+        return bool(
+            self.discovery_url
+            or self.allowed_audiences
+            or self.allowed_clients
+            or self.allowed_scopes
+            or self.create_cognito
+        )
+
+    def validate(self) -> None:
+        if self.mode not in INBOUND_AUTH_MODES:
+            raise ValueError(
+                f"Unsupported inbound auth mode {self.mode!r}; "
+                f"expected one of {sorted(INBOUND_AUTH_MODES)}"
+            )
+        if self.mode == "none":
+            if self.configured:
+                raise ValueError(
+                    "inbound auth settings were given but mode is 'none'; "
+                    "set mode='jwt' or drop the settings"
+                )
+            return
+        for name in ("allowed_audiences", "allowed_clients", "allowed_scopes"):
+            for value in getattr(self, name):
+                if not _AUTH_VALUE.fullmatch(value):
+                    raise ValueError(f"{name} value {value!r} has unsupported characters")
+        if self.create_cognito:
+            if self.discovery_url:
+                raise ValueError(
+                    "create_cognito derives the discovery URL; do not also set discovery_url"
+                )
+            return
+        if not _DISCOVERY_URL.fullmatch(self.discovery_url):
+            raise ValueError(
+                "inbound JWT discovery_url must be an https URL ending in "
+                "/.well-known/openid-configuration"
+            )
+        if not (self.allowed_audiences or self.allowed_clients or self.allowed_scopes):
+            raise ValueError(
+                "inbound JWT auth needs at least one allowed audience, client or scope"
+            )
+
+    def manifest(self) -> dict[str, Any]:
+        """Non-secret summary: the provider host only, not the full token settings."""
+        data: dict[str, Any] = {"mode": self.mode}
+        if self.mode == "jwt":
+            data["identityProvider"] = (
+                "cognito (created)"
+                if self.create_cognito
+                else urlsplit(self.discovery_url).hostname or ""
+            )
+        return data
+
+
+@dataclass(frozen=True)
+class DeploymentConfig:
+    """Where and how the generated server is deployed (design ADR-026).
+
+    Target-specific rules (for example which IaC a target supports) live on the
+    deployment plugin; this class rejects only values that are invalid everywhere.
+    """
+
+    target: str = "local"
+    iac: str = "none"
+    ci: str = "none"
+    scripts: bool = False
+    aws_region: str = ""
+    inbound_auth: InboundAuthConfig = field(default_factory=InboundAuthConfig)
+    extras: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        if self.target not in DEPLOYMENT_TARGETS:
+            raise ValueError(
+                f"Unsupported deployment target {self.target!r}; "
+                f"expected one of {list(DEPLOYMENT_TARGETS)}"
+            )
+        if self.iac not in IAC_OPTIONS:
+            raise ValueError(f"Unsupported iac {self.iac!r}; expected one of {sorted(IAC_OPTIONS)}")
+        if self.ci not in CI_OPTIONS:
+            raise ValueError(f"Unsupported ci {self.ci!r}; expected one of {sorted(CI_OPTIONS)}")
+        if self.aws_region and not _AWS_REGION.fullmatch(self.aws_region):
+            raise ValueError(f"aws_region {self.aws_region!r} is not an AWS region name")
+        if not isinstance(self.inbound_auth, InboundAuthConfig):
+            raise TypeError("inbound_auth must be an InboundAuthConfig")
+
+    def manifest(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "target": self.target,
+            "iac": self.iac,
+            "ci": self.ci,
+            "scripts": self.scripts,
+            "inboundAuth": self.inbound_auth.manifest(),
+        }
+        if self.aws_region:
+            data["awsRegion"] = self.aws_region
+        return data
+
+
+@dataclass(frozen=True)
+class EnvVar:
+    """One environment variable the generated server reads."""
+
+    name: str
+    description: str
+    secret: bool = False
+
+
+@dataclass(frozen=True)
+class ServerCapabilities:
+    """What a server plugin produced; deployment plugins read only this (ADR-026)."""
+
+    architecture: str
+    language: str
+    package_name: str
+    entrypoint: str  # "pkg.server:main"
+    transports: frozenset[str]
+    lock_files: tuple[str, ...] = ()
+    env_vars: tuple[EnvVar, ...] = ()
+    python_requires: str = ">=3.11"
+
+    @property
+    def secret_env_vars(self) -> tuple[EnvVar, ...]:
+        return tuple(v for v in self.env_vars if v.secret)
+
+
 @dataclass
 class GenerateContext:
-    """Frozen inputs for one generator plugin invocation."""
+    """Inputs for one server + deployment plugin invocation."""
 
     ir: IntermediateRep
     selected_operation_ids: list[str]
     tool_map: ToolMap
-    target: str = "agentcore"
+    architecture: str = "python-mcp"
     language: str = "python"
+    deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     agent_rules: AgentRulesBundle = field(default_factory=AgentRulesBundle)
     package_name: str = "generated_mcp"
     extras: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def target(self) -> str:
+        """Deprecated: the deployment target key (kept for older plugins)."""
+        return self.deployment.target

@@ -1,4 +1,7 @@
-"""Generation pipeline: IR → tool map → rules hooks → plugin → optional zip."""
+"""Generation pipeline (design ADR-026).
+
+IR → tool map → rules hooks → server plugin → deployment plugin → merged tree.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +10,7 @@ from typing import Any
 
 from mcp_wizard_generators.models import (
     AgentRulesBundle,
+    DeploymentConfig,
     FileTree,
     GenerateContext,
     IntermediateRep,
@@ -14,10 +18,19 @@ from mcp_wizard_generators.models import (
     ToolMap,
 )
 from mcp_wizard_generators.package_name import validate_package_name
-from mcp_wizard_generators.registry import GeneratorRegistry, get_default_registry
+from mcp_wizard_generators.registry import (
+    GeneratorRegistry,
+    check_deployment,
+    get_default_registry,
+)
 from mcp_wizard_generators.rules.base import RulesReport
+from mcp_wizard_generators.rules.embed import embed_agent_rules
 from mcp_wizard_generators.rules.hooks import apply_agent_rules
 from mcp_wizard_generators.toolmap import build_tool_map
+
+DEFAULT_ARCHITECTURE = "python-mcp"
+# Deployment plugins may append a section to these server files; any other overlap fails.
+APPENDABLE_PATHS = frozenset({"README.md"})
 
 
 @dataclass
@@ -44,10 +57,35 @@ class RulesEnforcementError(RuntimeError):
         super().__init__("Agent Rules enforcement failed: " + "; ".join(msgs))
 
 
+def resolve_target(
+    target: str | None,
+    architecture: str | None,
+    deployment: DeploymentConfig | None,
+) -> tuple[str, DeploymentConfig]:
+    """Map the pre-0.6 ``target`` argument onto (architecture, deployment)."""
+    if target is None:
+        return architecture or DEFAULT_ARCHITECTURE, deployment or DeploymentConfig()
+    if architecture is not None or deployment is not None:
+        raise ValueError("pass target or architecture/deployment, not both")
+    if target == "agentcore":
+        # The pre-0.6 AgentCore plugin was a stub with a placeholder server. AgentCore is
+        # now a deployment target and needs inbound auth settings, so there is no safe
+        # default to map this alias onto.
+        raise ValueError(
+            "target='agentcore' was removed in 0.6 (design ADR-026). Use "
+            "architecture='python-mcp' with deployment=DeploymentConfig("
+            "target='agentcore-container', inbound_auth=InboundAuthConfig(...))"
+        )
+    # "local" (and any architecture key) means that server with the local deployment.
+    return target, DeploymentConfig()
+
+
 def generate(
     ir: IntermediateRep | dict[str, Any],
     *,
-    target: str = "agentcore",
+    architecture: str | None = None,
+    deployment: DeploymentConfig | None = None,
+    target: str | None = None,
     language: str = "python",
     selected_operation_ids: list[str] | None = None,
     tool_name_overrides: dict[str, str] | None = None,
@@ -63,11 +101,21 @@ def generate(
 
     Intended call site: ``mcp-wizard-api`` Generate Service / worker — not an HTTP server.
 
+    ``architecture`` picks the server plugin (default ``python-mcp``) and ``deployment``
+    the deployment target (default ``local``). ``target`` is the pre-0.6 single key:
+    ``local`` still works; it cannot be combined with the new arguments.
+
     ``selected_operation_ids=None`` means all IR operations. An explicit empty list
-    raises ``ValueError`` (does not expand to all). ``package_name`` is validated
-    before any plugin writes a tree.
+    raises ``ValueError`` (does not expand to all). ``package_name`` and the deployment
+    options are validated before any plugin writes a tree.
     """
+    architecture, deployment = resolve_target(target, architecture, deployment)
     package_name = validate_package_name(package_name)
+    reg = registry or get_default_registry()
+    server = reg.server(architecture, language)
+    deploy = reg.deployment(deployment.target)
+    check_deployment(deploy, deployment)
+
     ir_model = ir if isinstance(ir, IntermediateRep) else IntermediateRep.from_dict(ir)
     if selected_operation_ids is None:
         selected = [op.id for op in ir_model.operations]
@@ -96,17 +144,24 @@ def generate(
         ir=ir_model,
         selected_operation_ids=list(selected),
         tool_map=tool_map,
-        target=target,
+        architecture=server.key,
         language=language,
+        deployment=deployment,
         security=security or SecurityConfig(),
         agent_rules=rules,
         package_name=package_name,
         extras=dict(extras or {}),
     )
 
-    reg = registry or get_default_registry()
-    plugin = reg.get(target, language)
-    tree = plugin.generate(ctx)
+    tree, caps = server.generate(ctx)
+    missing = deploy.requires - caps.transports
+    if missing:
+        raise ValueError(
+            f"deployment {deploy.key!r} needs transport(s) {sorted(missing)}, but the "
+            f"{server.key!r} server supports only {sorted(caps.transports)}"
+        )
+    tree = tree.merge(deploy.generate(ctx, caps), append=APPENDABLE_PATHS)
+    tree = tree.merge(FileTree(entries=embed_agent_rules(rules, set(tree.paths()))))
 
     # Post-generate rules pass (path / layout constraints)
     post_reports = apply_agent_rules(rules, tool_map, tree=tree)
@@ -116,11 +171,19 @@ def generate(
         raise RulesEnforcementError(reports)
 
     manifest = {
-        "generator": {"target": target, "language": language, "plugin": plugin.display_name},
+        "generator": {
+            "architecture": server.key,
+            "deployment": deploy.key,
+            "target": deploy.key,  # pre-0.6 field name
+            "language": language,
+            "plugin": server.display_name,
+            "deploymentPlugin": deploy.display_name,
+        },
         "package_name": package_name,
         "operations": selected,
         "tools": [t.tool_name for t in tool_map.tools],
         "files": tree.paths(),
         "rules_families": sorted({r.family for r in reports}),
+        "deployment": deployment.manifest(),
     }
     return GenerateResult(tree=tree, tool_map=tool_map, rules_reports=reports, manifest=manifest)

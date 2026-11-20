@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from mcp_wizard_generators.models import IntermediateRep, SecurityConfig
+from mcp_wizard_generators.models import DeploymentConfig, IntermediateRep, SecurityConfig
 from mcp_wizard_generators.openapi import is_openapi_document, openapi_to_ir
 from mcp_wizard_generators.package_name import validate_package_name
 from mcp_wizard_generators.packaging import pack_file_tree_to_zip
@@ -152,6 +152,7 @@ def generate_python_mcp(
     auth_mode: str = "none",
     security: SecurityConfig | Mapping[str, Any] | None = None,
     source_url: str | None = None,
+    deployment: DeploymentConfig | None = None,
 ) -> Path:
     """
     Generate a locally runnable Python MCP server from OpenAPI-derived operations.
@@ -174,6 +175,8 @@ def generate_python_mcp(
     - ``source_url``: the http(s) URL the OpenAPI document was fetched from. Relative
       ``servers`` URLs resolve against it so the generated ``API_BASE_URL`` is
       absolute. Workers should always pass the import URL.
+    - ``deployment``: where the server is deployed (design ADR-026). ``None`` means
+      ``local`` (stdio, no deployment files), the output of every release before 0.6.
 
     Returns ``Path(out_dir)`` when ``out_dir`` is set; otherwise ``Path(zip_path)``.
     At least one of ``out_dir`` / ``zip_path`` is required.
@@ -190,7 +193,8 @@ def generate_python_mcp(
     ir, selected = coerce_spec(spec, operations, source_url=source_url)
     result = generate(
         ir,
-        target="local",
+        architecture="python-mcp",
+        deployment=deployment,
         language="python",
         selected_operation_ids=selected,
         tool_name_overrides=tool_name_overrides,
@@ -230,11 +234,13 @@ def generate_python_mcp_result(
     security = coerce_security(kwargs.pop("security", None), auth_mode)
     package_name = validate_package_name(kwargs.pop("package_name", "generated_mcp"))
     tool_name_overrides = kwargs.pop("tool_name_overrides", None)
+    deployment = kwargs.pop("deployment", None)
     if kwargs:
         raise TypeError(f"Unexpected kwargs: {sorted(kwargs)}")
     return generate(
         ir,
-        target="local",
+        architecture="python-mcp",
+        deployment=deployment,
         language="python",
         selected_operation_ids=selected,
         tool_name_overrides=tool_name_overrides,

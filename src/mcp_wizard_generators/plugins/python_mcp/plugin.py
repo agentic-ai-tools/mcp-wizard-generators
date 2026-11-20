@@ -20,7 +20,14 @@ from mcp_wizard_generators.codegen import (
     toml_str,
 )
 from mcp_wizard_generators.findings import Finding, analyze_operation, visible
-from mcp_wizard_generators.models import FileEntry, FileTree, GenerateContext, ToolMapping
+from mcp_wizard_generators.models import (
+    EnvVar,
+    FileEntry,
+    FileTree,
+    GenerateContext,
+    ServerCapabilities,
+    ToolMapping,
+)
 from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
 from mcp_wizard_generators.plugins.python_mcp import client_template, tests_template
 from mcp_wizard_generators.plugins.python_mcp.annotations import annotation as _annotation
@@ -81,16 +88,56 @@ _RESERVED_PARAM_NAMES = frozenset(
 
 class PythonMcpPlugin:
     """
-    Near-term local MCP target: Anthropic / official MCP Python SDK layout.
+    Server architecture ``python-mcp``: official MCP Python SDK layout (ADR-016, ADR-023).
 
-    No AgentCore deploy stubs and no Agent Rules embedding (out of scope for this slice).
+    Emits only the server; deployment files come from a deployment plugin (ADR-026).
     """
 
-    key = "local"
+    key = "python-mcp"
     language = "python"
-    display_name = "Local Python MCP (stdio)"
+    display_name = "Python MCP server"
+    transports = frozenset({"stdio"})
 
-    def generate(self, ctx: GenerateContext) -> FileTree:
+    def generate(self, ctx: GenerateContext) -> tuple[FileTree, ServerCapabilities]:
+        return self._tree(ctx), self._capabilities(ctx)
+
+    def _capabilities(self, ctx: GenerateContext) -> ServerCapabilities:
+        return ServerCapabilities(
+            architecture=self.key,
+            language=self.language,
+            package_name=ctx.package_name,
+            entrypoint=f"{ctx.package_name}.server:main",
+            transports=self.transports,
+            lock_files=("requirements.lock",),
+            env_vars=self._env_vars(ctx),
+        )
+
+    @staticmethod
+    def _env_vars(ctx: GenerateContext) -> tuple[EnvVar, ...]:
+        """The variables ``.env.example`` documents, with secrets flagged."""
+        sec = ctx.security
+        found = [EnvVar("API_BASE_URL", "Upstream API base URL (http or https)")]
+        if sec.auth_mode == "api_key":
+            found += [
+                EnvVar("API_KEY", "Upstream API key", secret=True),
+                EnvVar("API_KEY_LOCATION", "header or query"),
+                EnvVar("API_KEY_NAME", "Header or query parameter name"),
+            ]
+        elif sec.auth_mode == "oauth2":
+            found += [
+                EnvVar("OAUTH_TOKEN_URL", "OAuth2 token endpoint (https)"),
+                EnvVar("OAUTH_CLIENT_ID", "OAuth2 client id", secret=True),
+                EnvVar("OAUTH_CLIENT_SECRET", "OAuth2 client secret", secret=True),
+                EnvVar("OAUTH_SCOPES", "Space-separated scopes"),
+                EnvVar("OAUTH_AUDIENCE", "Token audience"),
+            ]
+        found += [
+            EnvVar("MAX_RESPONSE_BYTES", "Largest response body the server reads"),
+            EnvVar("MCP_TRANSPORT", "MCP transport"),
+        ]
+        return tuple(found)
+
+    def _tree(self, ctx: GenerateContext) -> FileTree:
         pkg = ctx.package_name
         tools = ctx.tool_map.tools
         root_name = pkg.replace("_", "-")
@@ -215,7 +262,7 @@ class PythonMcpPlugin:
 
     def _manifest(self, ctx: GenerateContext) -> dict:
         return {
-            "target": self.key,
+            "target": ctx.deployment.target,
             "language": self.language,
             "sdk": "mcp (official Python SDK; MCPServer high-level API, mcp>=2,<3)",
             "title": ctx.ir.title,

@@ -46,7 +46,8 @@ REQUIRED_WHEEL_MODULES = (
     "mcp_wizard_generators/plugins/python_mcp/plugin.py",
     "mcp_wizard_generators/plugins/python_mcp/lock/requirements.in",
     "mcp_wizard_generators/plugins/python_mcp/lock/requirements.txt",
-    "mcp_wizard_generators/plugins/agentcore/plugin.py",
+    "mcp_wizard_generators/plugins/deploy/local.py",
+    "mcp_wizard_generators/rules/embed.py",
     "mcp_wizard_generators/rules/cursor.py",
     "mcp_wizard_generators/rules/anthropic.py",
 )

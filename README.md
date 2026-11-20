@@ -12,8 +12,12 @@ Pluggable **OpenAPI IR → MCP project** generators for [MCP Wizard](https://git
 This package is a **library + CLI**. It does **not** run HTTP servers or workers.  
 `mcp-wizard-api` owns jobs, entitlements, zip/GitHub delivery, and invokes this package offline.
 
-**Near-term slice:** `local` + `python` — runnable Anthropic-style MCP server zip + Cursor config.  
-**Also registered:** `agentcore` + `python` scaffold (AgentCore deploy stubs; expand later).
+Every generation combines two independent choices (design ADR-026):
+
+- **Server architecture:** `python-mcp` — a runnable MCP server on the official Python SDK.
+- **Deployment target:** `local` (stdio + Cursor config, the default). Docker and AWS Bedrock
+  AgentCore targets, with Terraform, GitHub Actions, scripts and `DEPLOY.md`, are in progress
+  for 0.6.0.
 
 ## Community
 
@@ -38,14 +42,14 @@ Fresh zips pin `mcp>=2.0.0,<3` and import only `MCPServer`; mcp 1.x is not suppo
 src/mcp_wizard_generators/
   models.py              # IntermediateRep, ToolMap, FileTree, GenerateContext
   toolmap.py             # IR ops → MCP tool names / JSON Schema inputs
-  pipeline.py            # generate(): IR → tool map → rules hooks → plugin → tree
+  pipeline.py            # generate(): IR → tool map → rules → server + deployment → tree
   python_mcp.py          # generate_python_mcp() — stable API for mcp-wizard-api
-  registry.py            # Plugin registry keyed by (target, language)
+  registry.py            # Server plugins by (architecture, language); deployments by target
   cli.py                 # mcp-wizard-gen / python -m mcp_wizard_generators
   packaging/             # zip helper for Artifact Service
-  plugins/python_mcp/   # Local Python MCP (stdio) emitter
-  plugins/agentcore/     # AWS Bedrock AgentCore scaffold (deploy stubs)
-  rules/                 # Cursor + Anthropic hooks (not enforced in local slice)
+  plugins/python_mcp/    # python-mcp server architecture
+  plugins/deploy/        # Deployment targets layered on a server tree (local today)
+  rules/                 # Cursor + Anthropic hooks; originals copied into the artifact
 tests/
   fixtures/              # tiny pets OpenAPI + IR
   goldens/               # expected file trees
@@ -196,10 +200,11 @@ python -m mcp_wizard_generators generate-python \
   --out-dir .smoke-out \
   --zip .smoke-out.zip
 
-# Equivalent via generic generate (default target=local)
+# Equivalent via generic generate (defaults: python-mcp server, local deployment)
 python -m mcp_wizard_generators generate \
   --ir tests/fixtures/pets_tiny.ir.json \
-  --target local \
+  --architecture python-mcp \
+  --deployment local \
   --language python \
   --select listPets \
   --select showPetById \
@@ -222,6 +227,12 @@ python -m mcp_wizard_generators generate-python `
 
 Console script (after install): `mcp-wizard-gen …` (Windows: `.venv\Scripts\mcp-wizard-gen.exe`).
 
+Deployment options (both generate commands): `--deployment`, `--iac`, `--ci`, `--scripts`,
+`--aws-region`, and MCP endpoint auth from any OIDC provider with `--jwt-discovery-url` plus
+`--jwt-audience` / `--jwt-client` / `--jwt-scope` (repeatable), or `--create-cognito`.
+`--target local` still works; `--target agentcore` was removed in 0.6 (the old AgentCore
+plugin was a placeholder).
+
 ## Generated artifact (local Python MCP)
 
 | Path | Purpose |
@@ -239,7 +250,7 @@ Console script (after install): `mcp-wizard-gen …` (Windows: `.venv\Scripts\mc
 | `SECURITY-NOTES.md` | Only when selected operations send a secret where it can be logged; how to remove them |
 | `generation-manifest.json` | tools, `findings` and generator metadata |
 
-**Out of scope in this slice:** AgentCore cloud deploy scaffolding, Agent Rules enforcement/embedding, non-Python languages, GitHub repo write delivery.
+**Out of scope in this slice:** Agent Rules enforcement (originals are copied, not enforced), non-Python languages, GitHub repo write delivery.
 
 ## Tests & local scripts
 
@@ -258,8 +269,7 @@ Windows PowerShell twins: `.\scripts\bootstrap.ps1`, `.\scripts\test.ps1`, `.\sc
 Details and the **macOS / WSL / Git Bash / PowerShell** matrix: [`docs/local-dev.md`](docs/local-dev.md).
 
 Golden coverage: `tests/fixtures/pets_tiny.ir.json` →  
-`tests/goldens/python_mcp_pets_tiny/` (+ zip member assertions) for `listPets` + `showPetById`.  
-AgentCore scaffold golden remains under `tests/goldens/agentcore_pets_tiny/`.
+`tests/goldens/python_mcp_pets_tiny/` (+ zip member assertions) for `listPets` + `showPetById`.
 
 ## Publish
 

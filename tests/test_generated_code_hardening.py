@@ -109,10 +109,9 @@ def _identifiers(tree: ast.AST) -> Iterator[str]:
             yield node.arg
 
 
-def _files(target: str, **kwargs) -> dict[str, str]:
+def _files(**kwargs) -> dict[str, str]:
     result = generate(
         IntermediateRep.from_dict(HOSTILE_IR),
-        target=target,
         language="python",
         package_name=PKG,
         **kwargs,
@@ -120,9 +119,9 @@ def _files(target: str, **kwargs) -> dict[str, str]:
     return {e.path: e.content for e in result.tree.entries}
 
 
-@pytest.fixture(params=["local", "agentcore"])
-def files(request: pytest.FixtureRequest) -> dict[str, str]:
-    return _files(request.param)
+@pytest.fixture
+def files() -> dict[str, str]:
+    return _files()
 
 
 def test_every_python_file_parses_and_payloads_stay_in_strings(files: dict[str, str]) -> None:
@@ -154,20 +153,6 @@ def test_readme_keeps_spec_text_on_one_line(files: dict[str, str]) -> None:
     lines = files["README.md"].splitlines()
     assert not any(line.startswith("__import__") for line in lines)
     assert not any(line.startswith(f"{MARK}_ENV") for line in lines)
-
-
-def test_agentcore_tools_table_is_a_python_literal() -> None:
-    tools_py = _files("agentcore")[f"src/{PKG}/tools.py"]
-    tree = ast.parse(tools_py)
-    assign = next(
-        n
-        for n in tree.body
-        if isinstance(n, ast.Assign | ast.AnnAssign)
-        and getattr(n.targets[0] if isinstance(n, ast.Assign) else n.target, "id", "") == "TOOLS"
-    )
-    tools = ast.literal_eval(assign.value)
-    assert tools["class"]["inputSchema"]["properties"]["flag"]["default"] is False
-    assert tools["class"]["inputSchema"]["properties"]["flag"]["nullable"] is True
 
 
 # ---- generated local server behaves correctly ----------------------------------------
@@ -273,10 +258,10 @@ def test_agent_rule_paths_cannot_escape_the_project() -> None:
     with pytest.raises(ValueError, match="path"):
         generate(
             IntermediateRep.from_dict(HOSTILE_IR),
-            target="agentcore",
             language="python",
             package_name=PKG,
             agent_rules=rules,
+            fail_on_rules_errors=False,
         )
 
 
