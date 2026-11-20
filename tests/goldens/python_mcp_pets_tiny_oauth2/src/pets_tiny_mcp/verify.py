@@ -144,12 +144,32 @@ def _write_json(report: dict[str, Any]) -> None:
     sys.stdout.write(text)
 
 
+_INSTALL = "Install the project first: pip install -r requirements.txt (or pip install -e .)"
+_REGENERATE = "server.py was changed; undo the change or regenerate the project in the wizard"
+
+
+def _fail(error: str, hint: str) -> int:
+    _write_json({"ok": False, "error": error, "hint": hint, "toolCount": 0})
+    return 1
+
+
 def main() -> int:
     try:
         report = build_report()
-    except Exception as exc:
-        _write_json({"ok": False, "error": str(exc), "toolCount": 0})
-        return 1
+    except ModuleNotFoundError as exc:
+        name = exc.name or "a module"
+        if name == "mcp" or name.startswith("mcp."):
+            hint = "This server needs mcp 2.x: pip install 'mcp>=2.0.0,<3'"
+        else:
+            hint = _INSTALL
+        return _fail(f"cannot import {name}", hint)
+    except ImportError as exc:
+        return _fail(f"import failed: {exc}", _INSTALL)
+    except SyntaxError as exc:
+        where = Path(exc.filename or "server.py").name
+        return _fail(f"{where} line {exc.lineno}: {exc.msg}", _REGENERATE)
+    except (TypeError, ValueError) as exc:
+        return _fail(f"a tool definition is invalid: {exc}", _REGENERATE)
     _write_json(report)
     return 0 if report["ok"] else 1
 
