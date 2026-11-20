@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from importlib.resources import files
 from textwrap import dedent
 
 from mcp_wizard_generators.codegen import (
@@ -24,8 +25,21 @@ from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
 from mcp_wizard_generators.plugins.python_mcp import client_template
 from mcp_wizard_generators.plugins.python_mcp.annotations import annotation as _annotation
 
+
 # Names a generated tool function or parameter must not take: module globals the
 # server uses, locals in each tool body, and builtins used in annotations.
+def _lock_file(name: str) -> str:
+    """A file from the packaged lock directory (see scripts/lock_python_mcp.py)."""
+    path = files("mcp_wizard_generators.plugins.python_mcp").joinpath("lock", name)
+    return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
+def _direct_requirements() -> list[str]:
+    """Direct dependencies with upper bounds; one source for every declaration."""
+    lines = _lock_file("requirements.in").splitlines()
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+
+
 _TYPING_NAMES = ("Any", "Annotated", "Literal", "Field", "JsonValue", "re")
 _RESERVED_MODULE_NAMES = frozenset(
     {
@@ -84,6 +98,7 @@ class PythonMcpPlugin:
             FileEntry("README.md", self._readme(ctx)),
             FileEntry("pyproject.toml", self._pyproject(pkg, ctx)),
             FileEntry("requirements.txt", self._requirements()),
+            FileEntry("requirements.lock", self._lock()),
             FileEntry(".env.example", self._env_example(ctx)),
             FileEntry(".cursor/mcp.json", self._cursor_mcp_json(pkg, ctx)),
             FileEntry(f"src/{pkg}/__init__.py", self._init(ctx)),
@@ -216,13 +231,16 @@ class PythonMcpPlugin:
                 "",
                 "## Run locally",
                 "",
-                "Create a venv, activate it (see matrix below), then install and run:",
+                "Create a venv, activate it (see matrix below), then install and run.",
+                "`requirements.lock` pins every package with sha256 hashes, so installs are",
+                "reproducible and pip refuses anything that was tampered with:",
                 "",
                 "```bash",
                 "python3 -m venv .venv",
                 "# activate — use the row that matches your OS / shell (table below)",
-                "pip install -r requirements.txt",
-                "# or: pip install -e .",
+                "pip install --require-hashes -r requirements.lock",
+                "pip install --no-deps -e .",
+                "# unpinned alternative (newest allowed versions): pip install -r requirements.txt",
                 "cp .env.example .env   # set API_BASE_URL (and auth if needed)",
                 f"python -m {pkg}",
                 "```",
@@ -241,7 +259,8 @@ class PythonMcpPlugin:
                 "",
                 "```powershell",
                 "py -3 -m venv .venv; .\\.venv\\Scripts\\Activate.ps1",
-                "pip install -r requirements.txt",
+                "pip install --require-hashes -r requirements.lock",
+                "pip install --no-deps -e .",
                 "Copy-Item .env.example .env",
                 f"python -m {pkg}",
                 "```",
@@ -289,6 +308,7 @@ class PythonMcpPlugin:
                 "",
                 "```",
                 "pyproject.toml / requirements.txt",
+                "requirements.lock  # hash-pinned install (pip --require-hashes)",
                 ".env.example",
                 ".cursor/mcp.json",
                 f"src/{pkg}/",
@@ -343,10 +363,11 @@ class PythonMcpPlugin:
 
     def _pyproject(self, pkg: str, ctx: GenerateContext) -> str:
         dist = pkg.replace("_", "-")
+        deps = "".join(f"\n              {json.dumps(r)}," for r in _direct_requirements())
         return dedent(
             f"""\
             [build-system]
-            requires = ["hatchling>=1.25"]
+            requires = ["hatchling>=1.25,<2"]
             build-backend = "hatchling.build"
 
             [project]
@@ -354,10 +375,7 @@ class PythonMcpPlugin:
             version = "0.1.0"
             description = {toml_str("Generated MCP server for " + ctx.ir.title)}
             requires-python = ">=3.11"
-            dependencies = [
-              "mcp>=2.0.0,<3",
-              "httpx>=0.27",
-              "pydantic>=2.7,<3",
+            dependencies = [{deps}
             ]
 
             [project.scripts]
@@ -370,7 +388,20 @@ class PythonMcpPlugin:
         )
 
     def _requirements(self) -> str:
-        return "mcp>=2.0.0,<3\nhttpx>=0.27\npydantic>=2.7,<3\n"
+        return "\n".join(_direct_requirements()) + "\n"
+
+    def _lock(self) -> str:
+        """The packaged hash lock, with a header for this project instead of the repo's."""
+        lines = _lock_file("requirements.txt").splitlines()
+        while lines and lines[0].startswith("#"):
+            lines.pop(0)  # uv's header names a command that only exists in this repo
+        header = [
+            "# Hash-pinned dependencies, prepared by mcp-wizard-generators:",
+            "# every package for every OS and CPython 3.11+, with sha256 hashes. Install with",
+            "#   pip install --require-hashes -r requirements.lock",
+            "#   pip install --no-deps -e .",
+        ]
+        return "\n".join(header) + "\n\n" + "\n".join(lines) + "\n"
 
     def _env_example(self, ctx: GenerateContext) -> str:
         base = ctx.ir.servers[0] if ctx.ir.servers else "https://api.example.com"

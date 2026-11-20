@@ -34,11 +34,12 @@ make tox         # tox env_list (pytest + lint, excluding e2e)
 make lint        # ruff format --check + ruff check
 make format      # ruff format + ruff check --fix
 make dist        # wheel + sdist → dist/ (python -m build)
+make lock        # refresh the generated-project hash lock (uv + network)
 make cli-smoke   # generate pets fixture → .smoke-out / .smoke-out.zip
 make clean
 ```
 
-`make e2e` is opt-in and is not part of `make test`. It needs network access: it generates the pets MCP project, `pip install`s it into a fresh virtualenv, starts `python -m pets_tiny_mcp` over stdio, and calls `listpets` through the MCP client against a local mock API. `make test` and tox pass `-m "not e2e"` so that install stays out of the fast suite.
+`make e2e` is opt-in and is not part of `make test`. It needs network access: it generates the pets MCP project, installs it into a fresh virtualenv from its `requirements.lock` (`--require-hashes`), starts `python -m pets_tiny_mcp` over stdio, and calls `listpets` through the MCP client against a local mock API. `make test` and tox pass `-m "not e2e"` so that install stays out of the fast suite.
 
 ## Dual helpers
 
@@ -89,6 +90,15 @@ python -m mcp_wizard_generators generate-python `
   --out-dir .smoke-out `
   --zip .smoke-out.zip
 ```
+
+## Generated-project dependency lock
+
+Every generated python-mcp zip ships `requirements.lock`, a universal lock (every OS, CPython 3.11+) with sha256 hashes. The worker that builds zips has no network, so the lock is prepared here and packaged:
+
+- `src/mcp_wizard_generators/plugins/python_mcp/lock/requirements.in` lists the direct dependencies with upper bounds. The generated `requirements.txt` and `pyproject.toml` are built from it.
+- `lock/requirements.txt` next to it is the compiled lock (`uv pip compile --universal --generate-hashes`).
+
+After editing `requirements.in`, run `make lock` (or `python scripts/lock_python_mcp.py`; add `--upgrade` to move every pin forward). CI runs `--check` and fails when the lock is out of date. Dependabot opens grouped weekly updates for the lock, and the CI e2e job installs a generated project from it on Linux and Windows.
 
 ## Path / shell pitfalls fixed in this repo
 

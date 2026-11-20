@@ -37,6 +37,9 @@ jobs:
       - name: Ruff lint
         run: ruff check .
 
+      - name: Generated-project lock is up to date
+        run: python scripts/lock_python_mcp.py --check
+
   test:
     name: Test (coverage)
     runs-on: ubuntu-latest
@@ -76,6 +79,37 @@ jobs:
           # Token may be unset until Codecov App / CODECOV_TOKEN is wired;
           # local coverage --cov-fail-under still gates the job above.
           fail_ci_if_error: false
+
+  e2e:
+    name: E2E (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package + dev tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # Installs a generated project from requirements.lock (--require-hashes)
+      # into a fresh venv and calls a tool over stdio.
+      - name: Pytest e2e
+        run: python -m pytest -m e2e -p no:cacheprovider
 
   semgrep:
     name: Semgrep

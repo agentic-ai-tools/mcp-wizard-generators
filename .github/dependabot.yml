@@ -12,3 +12,14 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+
+  # Hash lock shipped in every generated python-mcp project (ADR-023).
+  # CI re-checks it with scripts/lock_python_mcp.py --check.
+  - package-ecosystem: "pip"
+    directory: "/src/mcp_wizard_generators/plugins/python_mcp/lock"
+    schedule:
+      interval: "weekly"
+    groups:
+      generated-server-deps:
+        patterns: ["*"]
+    open-pull-requests-limit: 5

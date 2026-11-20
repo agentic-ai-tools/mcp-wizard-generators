@@ -46,17 +46,23 @@ def venv_python(venv_dir: Path) -> Path:
 
 
 def install_project(project_dir: Path, venv_dir: Path) -> Path:
-    """Create ``venv_dir`` and ``pip install`` the generated project into it.
+    """Create ``venv_dir`` and install the generated project the way its README says.
 
-    Returns the virtualenv interpreter. Needs network access to resolve the
-    generated project's dependencies.
+    Dependencies come from ``requirements.lock`` with ``--require-hashes`` (so a
+    stale or broken lock fails here), then the project itself with ``--no-deps``.
+    Returns the virtualenv interpreter. Needs network access.
     """
     _run([sys.executable, "-m", "venv", str(venv_dir)], timeout=120)
     python = venv_python(venv_dir)
     if not python.is_file():
         raise RuntimeError(f"venv interpreter missing: {python}")
+    lock = project_dir / "requirements.lock"
     _run(
-        [str(python), "-m", "pip", "install", str(project_dir)],
+        [str(python), "-m", "pip", "install", "--require-hashes", "-r", str(lock)],
+        timeout=_PIP_TIMEOUT_SECONDS,
+    )
+    _run(
+        [str(python), "-m", "pip", "install", "--no-deps", str(project_dir)],
         timeout=_PIP_TIMEOUT_SECONDS,
     )
     return python

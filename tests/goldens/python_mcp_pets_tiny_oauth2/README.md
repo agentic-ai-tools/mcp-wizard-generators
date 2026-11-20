@@ -17,13 +17,16 @@ expects for local MCP servers.
 
 ## Run locally
 
-Create a venv, activate it (see matrix below), then install and run:
+Create a venv, activate it (see matrix below), then install and run.
+`requirements.lock` pins every package with sha256 hashes, so installs are
+reproducible and pip refuses anything that was tampered with:
 
 ```bash
 python3 -m venv .venv
 # activate — use the row that matches your OS / shell (table below)
-pip install -r requirements.txt
-# or: pip install -e .
+pip install --require-hashes -r requirements.lock
+pip install --no-deps -e .
+# unpinned alternative (newest allowed versions): pip install -r requirements.txt
 cp .env.example .env   # set API_BASE_URL (and auth if needed)
 python -m pets_tiny_mcp
 ```
@@ -41,7 +44,8 @@ python -m pets_tiny_mcp
 
 ```powershell
 py -3 -m venv .venv; .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock
+pip install --no-deps -e .
 Copy-Item .env.example .env
 python -m pets_tiny_mcp
 ```
@@ -95,6 +99,7 @@ or use an absolute path. Set `API_BASE_URL` (and secrets) under `env`.
 
 ```
 pyproject.toml / requirements.txt
+requirements.lock  # hash-pinned install (pip --require-hashes)
 .env.example
 .cursor/mcp.json
 src/pets_tiny_mcp/
