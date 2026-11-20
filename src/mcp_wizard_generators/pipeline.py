@@ -137,11 +137,8 @@ def generate(
         unknown = [op_id for op_id in selected if op_id not in known]
         if unknown:
             raise ValueError("unknown operation id(s) in selection: " + ", ".join(unknown))
+    # Every selected id is known, and build_tool_map returns a tool per operation.
     tool_map = build_tool_map(ir_model, selected, tool_name_overrides)
-    if selected and not tool_map.tools:
-        raise ValueError(
-            "selected_operation_ids produced no tools; check that ids match IR operation ids"
-        )
     rules = agent_rules or AgentRulesBundle()
 
     # Pre-generate rules pass (tool naming constraints, etc.)

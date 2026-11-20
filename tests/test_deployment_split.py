@@ -315,3 +315,98 @@ def test_cli_reports_bad_deployment_options(extra: list[str], match: str) -> Non
     ir = ROOT / "fixtures" / "pets_tiny.ir.json"
     with pytest.raises(SystemExit, match=match):
         main(["generate", "--ir", str(ir), *extra])
+
+
+# ---- pipeline guards ----------------------------------------------------------------
+
+
+def test_empty_selection_is_an_error_not_all_operations() -> None:
+    with pytest.raises(ValueError, match="must not be an empty list"):
+        _files(selected_operation_ids=[])
+
+
+def test_unknown_operation_ids_are_named() -> None:
+    with pytest.raises(ValueError, match="nope"):
+        _files(selected_operation_ids=["listPets", "nope"])
+
+
+class _NeedsFeature(_AddsFile):
+    def server_features(self, config: DeploymentConfig) -> frozenset[str]:
+        return frozenset({"mtls"})
+
+
+def test_missing_server_feature_is_a_clear_error() -> None:
+    with pytest.raises(ValueError, match=r"server feature\(s\) \['mtls'\]"):
+        _files(registry=_registry_with(_NeedsFeature()))
+
+
+def _error_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp_wizard_generators import pipeline
+    from mcp_wizard_generators.rules.base import RulesReport, RulesViolation
+
+    report = RulesReport(
+        family="cursor",
+        violations=[
+            RulesViolation("warn", "cursor.style", "just a warning"),
+            RulesViolation("error", "cursor.naming", "tool names must be snake_case"),
+        ],
+    )
+    monkeypatch.setattr(pipeline, "apply_agent_rules", lambda *a, **k: [report])
+
+
+def test_rules_errors_stop_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp_wizard_generators.pipeline import RulesEnforcementError
+
+    _error_report(monkeypatch)
+    with pytest.raises(RulesEnforcementError) as info:
+        _files()
+    message = str(info.value)
+    assert "[cursor] cursor.naming: tool names must be snake_case" in message
+    assert "just a warning" not in message, "only error-severity violations are listed"
+    assert info.value.reports[0].family == "cursor"
+
+
+def test_rules_errors_are_reported_when_not_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
+    _error_report(monkeypatch)
+    result = generate(
+        IntermediateRep.from_dict(IR), package_name="pets_tiny_mcp", fail_on_rules_errors=False
+    )
+    assert result.rules_reports and result.rules_reports[0].has_errors
+    assert result.manifest["rules_families"] == ["cursor"]
+
+
+@pytest.mark.parametrize(
+    ("deployment", "match"),
+    [
+        (DeploymentConfig(ci="github-actions"), "ci"),
+        (DeploymentConfig(scripts=True), "scripts"),
+        (DeploymentConfig(aws_region="us-east-1"), "aws_region"),
+    ],
+)
+def test_local_rejects_ci_scripts_and_region(deployment: DeploymentConfig, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        _files(deployment=deployment)
+
+
+def test_inbound_auth_must_be_the_config_type() -> None:
+    with pytest.raises(TypeError, match="InboundAuthConfig"):
+        DeploymentConfig(inbound_auth={"mode": "jwt"})  # type: ignore[arg-type]
+
+
+def test_manifest_includes_the_region_only_when_set() -> None:
+    assert "awsRegion" not in DeploymentConfig().manifest()
+    assert DeploymentConfig(target="docker", aws_region="eu-west-2").manifest()["awsRegion"] == (
+        "eu-west-2"
+    )
+
+
+def test_context_target_alias_reads_the_deployment() -> None:
+    from mcp_wizard_generators.models import ToolMap
+
+    ctx = GenerateContext(
+        ir=IntermediateRep.from_dict(IR),
+        selected_operation_ids=[],
+        tool_map=ToolMap(),
+        deployment=DeploymentConfig(target="docker"),
+    )
+    assert ctx.target == "docker"
