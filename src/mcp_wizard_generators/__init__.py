@@ -2,10 +2,13 @@
 
 from mcp_wizard_generators.findings import Finding, operation_findings
 from mcp_wizard_generators.models import (
+    DeploymentConfig,
     FileEntry,
     FileTree,
     GenerateContext,
+    InboundAuthConfig,
     IntermediateRep,
+    ServerCapabilities,
     ToolMap,
     ToolMapping,
 )
@@ -15,12 +18,15 @@ from mcp_wizard_generators.python_mcp import generate_python_mcp, generate_pytho
 from mcp_wizard_generators.registry import GeneratorRegistry, get_default_registry
 
 __all__ = [
+    "DeploymentConfig",
     "FileEntry",
     "FileTree",
     "Finding",
     "GenerateContext",
     "GeneratorRegistry",
+    "InboundAuthConfig",
     "IntermediateRep",
+    "ServerCapabilities",
     "ToolMap",
     "ToolMapping",
     "generate",

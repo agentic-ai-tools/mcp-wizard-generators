@@ -4,25 +4,24 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_wizard_generators.plugins.agentcore import AgentCorePythonPlugin
+from mcp_wizard_generators.plugins.python_mcp import PythonMcpPlugin
 from mcp_wizard_generators.registry import GeneratorRegistry, get_default_registry
 
 
-def test_default_registry_has_local_and_agentcore_python() -> None:
+def test_default_registry_has_python_mcp() -> None:
     reg = get_default_registry()
-    local = reg.get("local", "python")
-    assert local.key == "local"
-    assert local.language == "python"
-    plugin = reg.get("agentcore", "python")
-    assert plugin.key == "agentcore"
+    plugin = reg.server("python-mcp", "python")
+    assert plugin.key == "python-mcp"
     assert plugin.language == "python"
+    assert "stdio" in plugin.transports
     targets = reg.list_targets()
-    assert any(t["key"] == "local" for t in targets)
-    assert any(t["key"] == "agentcore" for t in targets)
+    assert any(t["key"] == "python-mcp" for t in targets)
 
 
 def test_missing_plugin_raises() -> None:
     reg = GeneratorRegistry()
-    reg.register(AgentCorePythonPlugin())
+    reg.register(PythonMcpPlugin())
     with pytest.raises(KeyError, match="langgraph"):
         reg.get("langgraph", "python")
+    with pytest.raises(KeyError, match="docker"):
+        reg.deployment("docker")
