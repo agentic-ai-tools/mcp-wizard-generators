@@ -179,7 +179,9 @@ class FileTree:
             # Join POSIX segments so Windows hosts never treat "a/b" as one name.
             target = root.joinpath(*PurePosixPath(rel).parts) if rel else root
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(entry.content, encoding="utf-8")
+            # newline="": write the text as generated (LF) on every OS; Windows would
+            # otherwise turn each newline into CRLF and break shell scripts.
+            target.write_text(entry.content, encoding="utf-8", newline="")
             if entry.executable and os.name != "nt":
                 try:
                     target.chmod(target.stat().st_mode | 0o111)

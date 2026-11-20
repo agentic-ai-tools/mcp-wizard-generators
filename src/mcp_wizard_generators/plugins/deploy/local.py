@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from mcp_wizard_generators.models import (
     DeploymentConfig,
+    FileEntry,
     FileTree,
     GenerateContext,
     ServerCapabilities,
 )
+from mcp_wizard_generators.plugins.deploy import github_actions
 
 
 class LocalDeployment:
@@ -17,7 +19,7 @@ class LocalDeployment:
     display_name = "Local (stdio)"
     requires = frozenset({"stdio"})
     iac_options = frozenset({"none"})
-    ci_options = frozenset({"none"})
+    ci_options = frozenset({"none", "github-actions"})
     supports_scripts = False
     # stdio has no network endpoint, so there is nothing to authenticate.
     supports_inbound_auth = False
@@ -30,4 +32,10 @@ class LocalDeployment:
         return frozenset()
 
     def generate(self, ctx: GenerateContext, caps: ServerCapabilities) -> FileTree:
-        return FileTree(root_name=caps.package_name.replace("_", "-"))
+        entries: list[FileEntry] = []
+        if ctx.deployment.ci == "github-actions":
+            entries += [
+                github_actions.ci_workflow(caps, image=False),
+                github_actions.dependabot(["github-actions"]),
+            ]
+        return FileTree(entries=entries, root_name=caps.package_name.replace("_", "-"))

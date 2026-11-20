@@ -196,7 +196,7 @@ DOCKER_JWT_GOLDEN = "python_mcp_pets_tiny_docker_jwt"
 
 
 def docker_jwt_result():
-    """The docker deployment with server-side JWT checks (design ADR-026)."""
+    """The docker deployment with JWT checks, GitHub Actions and scripts (ADR-026)."""
     from mcp_wizard_generators.models import DeploymentConfig, InboundAuthConfig
 
     ir = IntermediateRep.from_dict(json.loads(FIXTURE.read_text(encoding="utf-8")))
@@ -206,6 +206,8 @@ def docker_jwt_result():
         package_name="pets_tiny_mcp",
         deployment=DeploymentConfig(
             target="docker",
+            ci="github-actions",
+            scripts=True,
             inbound_auth=InboundAuthConfig(
                 mode="jwt",
                 discovery_url="https://login.example.com/tenant/.well-known/openid-configuration",

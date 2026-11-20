@@ -18,8 +18,11 @@ Every generation combines two independent choices (design ADR-026):
 - **Deployment target:** `local` (stdio + Cursor config, the default) or `docker` (pinned,
   hash-locked, non-root image serving streamable HTTP; compose publishes on `127.0.0.1`).
   With `--jwt-discovery-url` plus an audience, client or scope, the docker server checks
-  bearer tokens itself (`auth.py`, any OIDC provider). AWS Bedrock AgentCore targets, with
-  Terraform, GitHub Actions, scripts and `DEPLOY.md`, are in progress for 0.6.0.
+  bearer tokens itself (`auth.py`, any OIDC provider). Docker always gets a step-by-step
+  `DEPLOY.md`; `--ci github-actions` adds CI (tests + image smoke test), a GHCR release
+  workflow and Dependabot (actions pinned by SHA), and `--scripts` adds paired `.sh` / `.ps1`
+  build, run and stop scripts. `local` can add CI too. AWS Bedrock AgentCore targets (with
+  Terraform) are in progress for 0.6.0.
 
 ## Community
 

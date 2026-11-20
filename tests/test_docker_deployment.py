@@ -123,7 +123,8 @@ def test_plain_compose_publishes_only_on_loopback(plain: dict[str, str]) -> None
     yaml = pytest.importorskip("yaml")
     compose = yaml.safe_load(plain["docker-compose.yml"])
     service = compose["services"][PKG.replace("_", "-")]
-    assert service["ports"] == ["127.0.0.1:8000:8000"]
+    # Host port is MCP_HOST_PORT from .env (default 8000); always bound to loopback.
+    assert service["ports"] == ["127.0.0.1:${MCP_HOST_PORT:-8000}:8000"]
     assert service["environment"]["MCP_AUTH"] == "platform"
     assert "read_only" in service and service["read_only"] is True
     assert service["cap_drop"] == ["ALL"]

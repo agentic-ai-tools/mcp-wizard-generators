@@ -378,12 +378,11 @@ def test_rules_errors_are_reported_when_not_enforced(monkeypatch: pytest.MonkeyP
 @pytest.mark.parametrize(
     ("deployment", "match"),
     [
-        (DeploymentConfig(ci="github-actions"), "ci"),
         (DeploymentConfig(scripts=True), "scripts"),
         (DeploymentConfig(aws_region="us-east-1"), "aws_region"),
     ],
 )
-def test_local_rejects_ci_scripts_and_region(deployment: DeploymentConfig, match: str) -> None:
+def test_local_rejects_scripts_and_region(deployment: DeploymentConfig, match: str) -> None:
     with pytest.raises(ValueError, match=match):
         _files(deployment=deployment)
 
