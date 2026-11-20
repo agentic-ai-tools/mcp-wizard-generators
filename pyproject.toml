@@ -78,6 +78,8 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
+# Goldens are generated-project fixtures; their tests/ run via test_python_mcp_generated_tests.
+norecursedirs = ["goldens", ".*", "build", "dist", "*.egg-info"]
 markers = [
   "e2e: install, start, and invoke a generated MCP server (needs network)",
 ]

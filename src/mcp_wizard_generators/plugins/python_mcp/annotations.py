@@ -82,12 +82,18 @@ def py_type(schema: Any) -> str:
     return "JsonValue"
 
 
-def _number(value: Any) -> str | None:
+def bound(value: Any) -> int | float | None:
+    """A usable numeric constraint: a finite int or float, never a bool."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     if isinstance(value, float) and not math.isfinite(value):
         return None
-    return repr(value)
+    return value
+
+
+def _number(value: Any) -> str | None:
+    checked = bound(value)
+    return None if checked is None else repr(checked)
 
 
 def _pattern(value: Any) -> str | None:

@@ -8,11 +8,19 @@ from pathlib import Path
 
 import pytest
 
-from e2e_harness import ToolCall, UpstreamMock, install_project, invoke_stdio
+from e2e_harness import (
+    ToolCall,
+    UpstreamMock,
+    install_more,
+    install_project,
+    invoke_stdio,
+    run_generated_tests,
+)
 from mcp_wizard_generators.python_mcp import generate_python_mcp
 
 ROOT = Path(__file__).parent
 FIXTURE = ROOT / "fixtures" / "pets_tiny.ir.json"
+PETSTORE = ROOT / "fixtures" / "petstore3.openapi.json"
 PACKAGE = "pets_tiny_mcp"
 SCRIPT_NAME = "pets-tiny-mcp.exe" if sys.platform == "win32" else "pets-tiny-mcp"
 
@@ -58,3 +66,21 @@ def test_generated_server_installs_starts_and_serves_a_tool_call(tmp_path: Path)
 
     script = venv_python.parent / SCRIPT_NAME
     assert script.is_file()
+
+    # The project's own tests pass in the installed venv (ADR-023).
+    proc = run_generated_tests(venv_python, project)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    # A second project in the same venv: every Petstore tool, API key in the query.
+    petstore = tmp_path / "petstore"
+    generate_python_mcp(
+        json.loads(PETSTORE.read_text(encoding="utf-8")),
+        None,
+        out_dir=petstore,
+        package_name="petstore_e2e_mcp",
+        security={"authMode": "api_key", "apiKey": {"location": "query", "name": "api_key"}},
+    )
+    install_more(venv_python, petstore)
+    proc = run_generated_tests(venv_python, petstore)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert " passed" in proc.stdout

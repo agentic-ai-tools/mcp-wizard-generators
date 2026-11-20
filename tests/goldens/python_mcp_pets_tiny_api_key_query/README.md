@@ -90,6 +90,19 @@ python -m pets_tiny_mcp.verify
 It prints UTF-8 JSON, including `toolCount`, and exits 0 when the exposed tool
 names match. After `pip install`, `pets-tiny-mcp-verify` runs the same check.
 
+## Tests
+
+`tests/` checks this server without calling the real API (every HTTP request
+goes to an in-memory mock): the tools and their arguments, authentication
+failures, HTTP status handling, and redaction of credentials in errors.
+
+```bash
+pip install "pytest>=8,<10"
+python -m pytest
+```
+
+Run them after you edit `server.py` or `client.py`, or upgrade dependencies.
+
 ## Configure in Cursor
 
 1. Copy `.cursor/mcp.json` into your project's `.cursor/mcp.json`, **or**
@@ -111,5 +124,6 @@ src/pets_tiny_mcp/
   server.py        # MCP tools + stdio entry
   client.py        # httpx client → API_BASE_URL
   verify.py        # python -m pets_tiny_mcp.verify
+tests/            # python -m pytest (no network)
 generation-manifest.json
 ```

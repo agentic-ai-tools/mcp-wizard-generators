@@ -39,7 +39,7 @@ make cli-smoke   # generate pets fixture → .smoke-out / .smoke-out.zip
 make clean
 ```
 
-`make e2e` is opt-in and is not part of `make test`. It needs network access: it generates the pets MCP project, installs it into a fresh virtualenv from its `requirements.lock` (`--require-hashes`), starts `python -m pets_tiny_mcp` over stdio, and calls `listpets` through the MCP client against a local mock API. `make test` and tox pass `-m "not e2e"` so that install stays out of the fast suite.
+`make e2e` is opt-in and is not part of `make test`. It needs network access: it generates the pets MCP project, installs it into a fresh virtualenv from its `requirements.lock` (`--require-hashes`), starts `python -m pets_tiny_mcp` over stdio, calls `listpets` through the MCP client against a local mock API, then runs the generated project's own `tests/` in that venv (plus a Petstore project with an API key in the query). `make test` and tox pass `-m "not e2e"` so that install stays out of the fast suite.
 
 ## Dual helpers
 
