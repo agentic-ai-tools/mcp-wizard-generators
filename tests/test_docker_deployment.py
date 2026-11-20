@@ -450,8 +450,17 @@ def test_generated_jwt_tests_pass(tmp_path: Path) -> None:
 def test_docker_image_builds_and_serves_over_http(tmp_path: Path) -> None:
     if not shutil.which("docker"):
         pytest.skip("docker not installed")
-    if subprocess.run(["docker", "info"], capture_output=True, check=False).returncode:
+    info = subprocess.run(
+        ["docker", "info", "--format", "{{.OSType}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if info.returncode:
         pytest.skip("docker daemon not running")
+    if info.stdout.strip() != "linux":
+        # GitHub's Windows runners run Windows containers and cannot pull Linux images.
+        pytest.skip(f"docker runs {info.stdout.strip() or 'unknown'} containers, not linux")
     project = tmp_path / "pets"
     generate(
         IntermediateRep.from_dict(IR),
