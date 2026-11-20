@@ -64,7 +64,7 @@ def test_generated_readme_documents_venv_activate_os_matrix() -> None:
 
 
 def test_generated_deps_pin_mcp_2() -> None:
-    """Artifact deps must match MCPServer (mcp 2.x), not FastMCP-only 1.x."""
+    """Artifact deps must match MCPServer (mcp 2.x)."""
     result = _generate()
     pyproject = result.tree.get("pyproject.toml")
     requirements = result.tree.get("requirements.txt")
@@ -75,19 +75,24 @@ def test_generated_deps_pin_mcp_2() -> None:
         ("requirements.txt", requirements.content),
     ):
         assert "mcp" in content, label
-        # Lower bound is mcp 2 (FastMCP removed); keep an upper bound under 3.
+        # Lower bound is mcp 2; keep an upper bound under 3.
         assert re.search(r"mcp\s*>=\s*2(\.0(\.0)?)?", content), f"{label} must pin mcp>=2"
         assert re.search(r"mcp\s*>=\s*2[^\"'\n]*,\s*<\s*3", content), f"{label} must keep mcp>=2,<3"
 
 
-def test_generated_server_imports_mcpserver_not_fastmcp_only() -> None:
+def test_generated_server_imports_mcpserver() -> None:
     result = _generate()
     server = result.tree.get("src/pets_tiny_mcp/server.py")
     assert server is not None
-    content = server.content
-    assert "from mcp.server.mcpserver import MCPServer" in content
-    # Must not be FastMCP-only; a 1.x fallback shim is optional.
-    assert "mcp.server.fastmcp" not in content or "ImportError" in content or "except" in content
+    assert "from mcp.server.mcpserver import MCPServer" in server.content
+
+
+def test_no_file_in_the_zip_mentions_fastmcp() -> None:
+    """mcp 2.x only: no 1.x import, fallback shim or README note (ADR-023)."""
+    result = _generate()
+    for path in result.tree.paths():
+        content = result.tree.get(path).content
+        assert "fastmcp" not in content.lower(), path
 
 
 def test_generated_server_imports_against_pinned_mcp(tmp_path: Path) -> None:
