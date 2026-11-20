@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -274,11 +275,15 @@ def test_actionlint_and_shellcheck_pass(tmp_path: Path, full: dict[str, str]) ->
     )
     tree.write_to(tmp_path)
     mount = f"{tmp_path.resolve()}:/repo"
+    # pytest's tmp dirs are private (0700) on POSIX; run the linters as this user so they
+    # can read the mount. Docker Desktop on Windows does not apply host permissions.
+    user = ["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []
     actionlint = subprocess.run(
         [
             "docker",
             "run",
             "--rm",
+            *user,
             "-v",
             mount,
             "-w",
@@ -294,7 +299,7 @@ def test_actionlint_and_shellcheck_pass(tmp_path: Path, full: dict[str, str]) ->
     assert actionlint.returncode == 0, actionlint.stdout + actionlint.stderr
     scripts = [f"/repo/{p}" for p in SCRIPTS if p.endswith(".sh")]
     shellcheck = subprocess.run(
-        ["docker", "run", "--rm", "-v", mount, SHELLCHECK_IMAGE, *scripts],
+        ["docker", "run", "--rm", *user, "-v", mount, SHELLCHECK_IMAGE, *scripts],
         capture_output=True,
         text=True,
         timeout=300,
