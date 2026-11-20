@@ -30,6 +30,11 @@ EXPECTED_ZIP_MEMBERS = [
     "pets-tiny-mcp/src/pets_tiny_mcp/client.py",
     "pets-tiny-mcp/src/pets_tiny_mcp/server.py",
     "pets-tiny-mcp/src/pets_tiny_mcp/verify.py",
+    "pets-tiny-mcp/tests/conftest.py",
+    "pets-tiny-mcp/tests/test_auth.py",
+    "pets-tiny-mcp/tests/test_http_errors.py",
+    "pets-tiny-mcp/tests/test_redaction.py",
+    "pets-tiny-mcp/tests/test_tools.py",
 ]
 
 
@@ -56,7 +61,7 @@ def test_python_mcp_pets_tiny_golden() -> None:
     expected_paths = sorted(
         str(p.relative_to(GOLDEN_DIR)).replace("\\", "/")
         for p in GOLDEN_DIR.rglob("*")
-        if p.is_file()
+        if p.is_file() and "__pycache__" not in p.parts
     )
     actual_paths = result.tree.paths()
     assert actual_paths == expected_paths, (
@@ -174,7 +179,7 @@ def test_python_mcp_security_goldens(golden: str) -> None:
     expected_paths = sorted(
         str(p.relative_to(golden_dir)).replace("\\", "/")
         for p in golden_dir.rglob("*")
-        if p.is_file()
+        if p.is_file() and "__pycache__" not in p.parts
     )
     assert result.tree.paths() == expected_paths
     for entry in result.tree.entries:

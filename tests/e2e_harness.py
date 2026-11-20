@@ -68,6 +68,36 @@ def install_project(project_dir: Path, venv_dir: Path) -> Path:
     return python
 
 
+def run_generated_tests(python: Path, project_dir: Path) -> subprocess.CompletedProcess[str]:
+    """Run a generated project's own ``tests/`` with the venv interpreter, as its README says.
+
+    Installs pytest (the project's ``test`` extra) first. The project must already
+    be installed in the venv (``install_project``, or ``pip install --no-deps``).
+    """
+    _run(
+        [str(python), "-m", "pip", "install", "pytest>=8,<10"],
+        timeout=_PIP_TIMEOUT_SECONDS,
+    )
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("API_", "OAUTH_", "MAX_"))}
+    return subprocess.run(
+        [str(python), "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+        cwd=project_dir,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=_PIP_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+
+def install_more(python: Path, project_dir: Path) -> None:
+    """Install another generated project into an existing venv (dependencies already there)."""
+    _run(
+        [str(python), "-m", "pip", "install", "--no-deps", str(project_dir)],
+        timeout=_PIP_TIMEOUT_SECONDS,
+    )
+
+
 class UpstreamMock:
     """Local JSON API bound to ``127.0.0.1`` on an ephemeral port.
 

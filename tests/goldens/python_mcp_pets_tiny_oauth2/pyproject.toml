@@ -13,9 +13,16 @@ dependencies = [
   "pydantic>=2.7,<3",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
 [project.scripts]
 pets-tiny-mcp = "pets_tiny_mcp.server:main"
 pets-tiny-mcp-verify = "pets_tiny_mcp.verify:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pets_tiny_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

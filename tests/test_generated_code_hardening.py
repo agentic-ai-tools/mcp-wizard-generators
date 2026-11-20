@@ -140,7 +140,7 @@ def test_every_python_file_parses_and_payloads_stay_in_strings(files: dict[str, 
 def test_pyproject_is_valid_toml_with_no_injected_tables(files: dict[str, str]) -> None:
     data = tomllib.loads(files["pyproject.toml"])
     assert set(data) == {"build-system", "project", "tool"}
-    assert set(data["tool"]) == {"hatch"}
+    assert "hatch" in data["tool"] and set(data["tool"]) <= {"hatch", "pytest"}
     assert "Evil" in data["project"]["description"]
 
 

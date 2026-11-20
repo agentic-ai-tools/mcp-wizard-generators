@@ -22,7 +22,7 @@ from mcp_wizard_generators.codegen import (
 from mcp_wizard_generators.findings import Finding, analyze_operation, visible
 from mcp_wizard_generators.models import FileEntry, FileTree, GenerateContext, ToolMapping
 from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
-from mcp_wizard_generators.plugins.python_mcp import client_template
+from mcp_wizard_generators.plugins.python_mcp import client_template, tests_template
 from mcp_wizard_generators.plugins.python_mcp.annotations import annotation as _annotation
 
 
@@ -111,7 +111,45 @@ class PythonMcpPlugin:
         notes = self._security_notes(ctx)
         if notes:
             entries.append(FileEntry("SECURITY-NOTES.md", notes))
+        entries += [FileEntry(path, text) for path, text in self._tests(ctx).items()]
         return FileTree(entries=entries, root_name=root_name)
+
+    @staticmethod
+    def _schema_parts(tool: ToolMapping) -> tuple[dict, dict, list[str]]:
+        schema = tool.input_schema if isinstance(tool.input_schema, dict) else {}
+        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        required = [
+            n
+            for n in dict.fromkeys(schema.get("required") or [])
+            if isinstance(n, str) and n in props
+        ]
+        return schema, props, required
+
+    @staticmethod
+    def _param_names(props: dict) -> dict[str, str]:
+        """Spec names -> safe Python identifiers; the wire name is kept for the HTTP call."""
+        taken: set[str] = set()
+        return {wire: py_ident(wire, taken, _RESERVED_PARAM_NAMES) for wire in props}
+
+    def _tests(self, ctx: GenerateContext) -> dict[str, str]:
+        """The project's tests/ folder (tool regression, auth, HTTP errors, redaction)."""
+        cases: list[dict] = []
+        sensitive: list[dict] = []
+        for tool in ctx.tool_map.tools:
+            schema, props, required = self._schema_parts(tool)
+            case, redaction = tests_template.tool_case(
+                name=tool.tool_name,
+                method=tool.method,
+                path=tool.path,
+                props=props,
+                required=required,
+                py_names=self._param_names(props),
+                secret_wires=[f.parameter for f in analyze_operation(schema) if f.parameter],
+            )
+            cases.append(case)
+            if redaction:
+                sensitive.append(redaction)
+        return tests_template.build(ctx.package_name, ctx.security.auth_mode, cases, sensitive)
 
     @staticmethod
     def _tool_findings(tools: list[ToolMapping]) -> list[tuple[ToolMapping, list[Finding]]]:
@@ -166,8 +204,9 @@ class PythonMcpPlugin:
                 "  Operations step and generate again.",
                 "- **Edit this project:** delete the tool's `@mcp.tool` function from",
                 f"  `src/{ctx.package_name}/server.py`, remove its entry from",
-                "  `generation-manifest.json` and from `EXPECTED` in `verify.py`, then run",
-                f"  `python -m {ctx.package_name}.verify`.",
+                "  `generation-manifest.json`, from `EXPECTED` in `verify.py` and from",
+                "  `TOOLS` in `tests/test_tools.py`, then run",
+                f"  `python -m {ctx.package_name}.verify` and `python -m pytest`.",
                 "",
             ]
         if auth_notes:
@@ -295,6 +334,19 @@ class PythonMcpPlugin:
                 "names match. After `pip install`, "
                 f"`{pkg.replace('_', '-')}-verify` runs the same check.",
                 "",
+                "## Tests",
+                "",
+                "`tests/` checks this server without calling the real API (every HTTP request",
+                "goes to an in-memory mock): the tools and their arguments, authentication",
+                "failures, HTTP status handling, and redaction of credentials in errors.",
+                "",
+                "```bash",
+                'pip install "pytest>=8,<10"',
+                "python -m pytest",
+                "```",
+                "",
+                "Run them after you edit `server.py` or `client.py`, or upgrade dependencies.",
+                "",
                 "## Configure in Cursor",
                 "",
                 "1. Copy `.cursor/mcp.json` into your project's `.cursor/mcp.json`, **or**",
@@ -316,6 +368,7 @@ class PythonMcpPlugin:
                 "  server.py        # MCP tools + stdio entry",
                 "  client.py        # httpx client → API_BASE_URL",
                 f"  verify.py        # python -m {pkg}.verify",
+                "tests/            # python -m pytest (no network)",
                 "generation-manifest.json",
                 "```",
                 "",
@@ -378,12 +431,19 @@ class PythonMcpPlugin:
             dependencies = [{deps}
             ]
 
+            [project.optional-dependencies]
+            test = ["pytest>=8,<10"]
+
             [project.scripts]
             {dist} = "{pkg}.server:main"
             {dist}-verify = "{pkg}.verify:main"
 
             [tool.hatch.build.targets.wheel]
             packages = ["src/{pkg}"]
+
+            [tool.pytest.ini_options]
+            testpaths = ["tests"]
+            pythonpath = ["src"]
             """
         )
 
@@ -931,14 +991,10 @@ class PythonMcpPlugin:
 
     def _tool_function(self, tool: ToolMapping, taken_functions: set[str]) -> str:
         """Emit one ``@mcp.tool`` function. Every spec value is escaped or sanitized."""
-        schema = tool.input_schema if isinstance(tool.input_schema, dict) else {}
-        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
-        required = {n for n in (schema.get("required") or []) if isinstance(n, str)}
+        schema, props, required_list = self._schema_parts(tool)
+        required = set(required_list)
         path_params = set(re.findall(r"\{([^{}]+)\}", tool.path))
-
-        # Spec names -> safe Python identifiers; the wire name is kept for the HTTP call.
-        taken_params: set[str] = set()
-        py_names = {wire: py_ident(wire, taken_params, _RESERVED_PARAM_NAMES) for wire in props}
+        py_names = self._param_names(props)
         func_name = py_ident(tool.tool_name, taken_functions, _RESERVED_MODULE_NAMES)
 
         doc = docstring_text(tool.description)
