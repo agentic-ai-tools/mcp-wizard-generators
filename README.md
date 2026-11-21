@@ -21,8 +21,16 @@ Every generation combines two independent choices (design ADR-026):
   bearer tokens itself (`auth.py`, any OIDC provider). Docker always gets a step-by-step
   `DEPLOY.md`; `--ci github-actions` adds CI (tests + image smoke test), a GHCR release
   workflow and Dependabot (actions pinned by SHA), and `--scripts` adds paired `.sh` / `.ps1`
-  build, run and stop scripts. `local` can add CI too. AWS Bedrock AgentCore targets (with
-  Terraform) are in progress for 0.6.0.
+  build, run and stop scripts. `local` can add CI too.
+- **`agentcore-container`** (`--iac terraform --aws-region ...` plus JWT settings or
+  `--create-cognito`): an ARM64 image on AWS Bedrock AgentCore Runtime. AgentCore's JWT
+  authorizer checks tokens from any OIDC provider; upstream credentials come from Secrets
+  Manager (`requirements-aws.lock` adds boto3). Terraform has a one-time `bootstrap/`
+  (state bucket, ECR repository, credentials secret, GitHub OIDC deploy role) and the main
+  module (runtime, least-privilege execution role, optional Cognito). `--ci github-actions`
+  adds an OIDC deploy workflow behind a `production` environment; `--scripts` adds paired
+  bootstrap, deploy and destroy scripts. The `agentcore-code` target (direct code deploy) is
+  next.
 
 ## Community
 

@@ -40,6 +40,22 @@ ACTIONS = {
     "docker/build-push-action": (
         "docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0"
     ),
+    "aws-actions/configure-aws-credentials": (
+        "aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0"
+    ),
+    "aws-actions/amazon-ecr-login": (
+        "aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2.2.0"
+    ),
+    "hashicorp/setup-terraform": (
+        "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1"
+    ),
 }
+
+# Terraform used by generated workflows, and the AWS provider range generated modules
+# accept. 6.73 is the version the AgentCore runtime resource was validated against.
+TERRAFORM_VERSION = "1.17.2"
+AWS_PROVIDER_VERSION = "~> 6.73"
+# Docker platform AgentCore Runtime requires.
+AGENTCORE_PLATFORM = "linux/arm64"
 # Python versions the generated CI tests on (oldest and newest supported).
 CI_PYTHON_VERSIONS = ("3.11", "3.13")

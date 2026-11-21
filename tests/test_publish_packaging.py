@@ -55,6 +55,8 @@ REQUIRED_WHEEL_MODULES = (
     "mcp_wizard_generators/plugins/deploy/github_actions.py",
     "mcp_wizard_generators/plugins/deploy/scripts.py",
     "mcp_wizard_generators/plugins/deploy/deploy_docs.py",
+    "mcp_wizard_generators/plugins/deploy/agentcore_container.py",
+    "mcp_wizard_generators/plugins/deploy/aws_terraform.py",
     "mcp_wizard_generators/plugins/python_mcp/auth_template.py",
     "mcp_wizard_generators/rules/embed.py",
     "mcp_wizard_generators/rules/cursor.py",

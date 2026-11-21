@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.25,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pets-tiny-mcp"
+version = "0.1.0"
+description = "Generated MCP server for Pets Tiny API"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp>=2.0.0,<3",
+  "httpx>=0.28,<1",
+  "pydantic>=2.7,<3",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+aws = ["boto3>=1.35,<2"]
+
+[project.scripts]
+pets-tiny-mcp = "pets_tiny_mcp.server:main"
+pets-tiny-mcp-verify = "pets_tiny_mcp.verify:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pets_tiny_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
