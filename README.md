@@ -29,8 +29,13 @@ Every generation combines two independent choices (design ADR-026):
   (state bucket, ECR repository, credentials secret, GitHub OIDC deploy role) and the main
   module (runtime, least-privilege execution role, optional Cognito). `--ci github-actions`
   adds an OIDC deploy workflow behind a `production` environment; `--scripts` adds paired
-  bootstrap, deploy and destroy scripts. The `agentcore-code` target (direct code deploy) is
-  next.
+  bootstrap, deploy and destroy scripts.
+- **`agentcore-code`** (same options): AgentCore direct code deployment, with no container.
+  The generated `deploy/agentcore/package.py` builds a reproducible ARM64 zip
+  (hash-locked `aarch64-manylinux2014` wheels installed by uv, the server package and a
+  root `main.py`). The zip goes to a private, versioned S3 code bucket from the bootstrap
+  as `code/<sha256>.zip`, and runs on AgentCore's managed Python 3.13 runtime. Auth,
+  secrets, CI and scripts work as for `agentcore-container`.
 
 ## Community
 

@@ -233,10 +233,12 @@ def test_python_mcp_docker_jwt_golden() -> None:
 
 
 AGENTCORE_GOLDEN = "python_mcp_pets_tiny_agentcore_container"
+AGENTCORE_CODE_GOLDEN = "python_mcp_pets_tiny_agentcore_code"
 
 
-def agentcore_result():
-    """AgentCore container: API key from Secrets Manager, any-OIDC JWT, CI and scripts."""
+def agentcore_result(target: str = "agentcore-container"):
+    """AgentCore (container or code): API key from Secrets Manager, any-OIDC JWT, CI and
+    scripts."""
     from mcp_wizard_generators.models import DeploymentConfig, InboundAuthConfig
 
     ir = IntermediateRep.from_dict(json.loads(FIXTURE.read_text(encoding="utf-8")))
@@ -246,7 +248,7 @@ def agentcore_result():
         package_name="pets_tiny_mcp",
         security={"authMode": "api_key", "apiKey": {"location": "header", "name": "X-API-Key"}},
         deployment=DeploymentConfig(
-            target="agentcore-container",
+            target=target,
             iac="terraform",
             ci="github-actions",
             scripts=True,
@@ -260,9 +262,13 @@ def agentcore_result():
     )
 
 
-def test_python_mcp_agentcore_container_golden() -> None:
-    result = agentcore_result()
-    golden_dir = ROOT / "goldens" / AGENTCORE_GOLDEN
+@pytest.mark.parametrize(
+    ("target", "golden"),
+    [("agentcore-container", AGENTCORE_GOLDEN), ("agentcore-code", AGENTCORE_CODE_GOLDEN)],
+)
+def test_python_mcp_agentcore_golden(target: str, golden: str) -> None:
+    result = agentcore_result(target)
+    golden_dir = ROOT / "goldens" / golden
     expected_paths = sorted(
         str(p.relative_to(golden_dir)).replace("\\", "/")
         for p in golden_dir.rglob("*")
@@ -272,4 +278,4 @@ def test_python_mcp_agentcore_container_golden() -> None:
     for entry in result.tree.entries:
         actual = golden_view(entry.path, _normalize(entry.content))
         expected = _normalize((golden_dir / entry.path).read_text(encoding="utf-8"))
-        assert actual == expected, f"content drift: {AGENTCORE_GOLDEN}/{entry.path}"
+        assert actual == expected, f"content drift: {golden}/{entry.path}"

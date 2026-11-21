@@ -39,10 +39,10 @@ class AgentCoreContainerDeployment:
 
     def validate(self, config: DeploymentConfig) -> None:
         if not config.aws_region:
-            raise ValueError("deployment 'agentcore-container' needs aws_region")
+            raise ValueError(f"deployment '{self.key}' needs aws_region")
         if config.inbound_auth.mode != "jwt":
             raise ValueError(
-                "deployment 'agentcore-container' needs inbound JWT auth: AgentCore checks "
+                f"deployment '{self.key}' needs inbound JWT auth: AgentCore checks "
                 "every caller's token. Set a discovery URL plus an audience, client or "
                 "scope, or create_cognito"
             )

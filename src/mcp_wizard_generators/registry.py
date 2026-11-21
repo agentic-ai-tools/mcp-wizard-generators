@@ -135,6 +135,7 @@ def get_default_registry() -> GeneratorRegistry:
     global _default
     if _default is None:
         from mcp_wizard_generators.plugins.deploy import (
+            AgentCoreCodeDeployment,
             AgentCoreContainerDeployment,
             DockerDeployment,
             LocalDeployment,
@@ -146,5 +147,6 @@ def get_default_registry() -> GeneratorRegistry:
         registry.register_deployment(LocalDeployment())
         registry.register_deployment(DockerDeployment())
         registry.register_deployment(AgentCoreContainerDeployment())
+        registry.register_deployment(AgentCoreCodeDeployment())
         _default = registry
     return _default
