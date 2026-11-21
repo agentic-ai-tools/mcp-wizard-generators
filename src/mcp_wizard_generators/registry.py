@@ -134,12 +134,17 @@ def get_default_registry() -> GeneratorRegistry:
     """Lazy-built registry with the shipped server and deployment plugins."""
     global _default
     if _default is None:
-        from mcp_wizard_generators.plugins.deploy import DockerDeployment, LocalDeployment
+        from mcp_wizard_generators.plugins.deploy import (
+            AgentCoreContainerDeployment,
+            DockerDeployment,
+            LocalDeployment,
+        )
         from mcp_wizard_generators.plugins.python_mcp import PythonMcpPlugin
 
         registry = GeneratorRegistry()
         registry.register_server(PythonMcpPlugin())
         registry.register_deployment(LocalDeployment())
         registry.register_deployment(DockerDeployment())
+        registry.register_deployment(AgentCoreContainerDeployment())
         _default = registry
     return _default

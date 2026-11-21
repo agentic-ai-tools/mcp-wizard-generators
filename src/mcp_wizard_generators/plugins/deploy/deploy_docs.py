@@ -349,3 +349,313 @@ def docker_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, jwt: boo
         "commands for bash (macOS, Linux, WSL, Git Bash) and PowerShell.",
     ]
     return render(f"Deploy {title} with Docker", intro, sections)
+
+
+def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name: str) -> str:
+    """Step-by-step deployment to AWS Bedrock AgentCore Runtime (container target)."""
+    deployment = ctx.deployment
+    auth = deployment.inbound_auth
+    pkg = caps.package_name
+    credentials = [v.name for v in caps.secret_env_vars]
+    ci = deployment.ci == "github-actions"
+    tf = "deploy/terraform"
+    boot = f"{tf}/bootstrap"
+    title = one_line(ctx.ir.title)
+    sections: list[Section] = []
+
+    prereqs = [
+        "- An AWS account, in a Region where Amazon Bedrock AgentCore is available, and",
+        "  administrator credentials for the one-time bootstrap (`aws sts get-caller-identity`).",
+        "- AWS CLI v2, Terraform 1.10 or newer, and Docker with `buildx` (Docker Desktop",
+        "  includes it). Images are built for `linux/arm64`, which AgentCore requires.",
+        "- Python 3.11+ for the `verify` check (`pip install -r requirements.txt`, then",
+        "  `pip install --no-deps -e .`).",
+    ]
+    if not auth.create_cognito:
+        prereqs.append("- An OIDC identity provider that issues access tokens (step 3).")
+    if ci:
+        prereqs.append("- A GitHub repository for this project, with Actions enabled.")
+    sections.append(Section("Prerequisites", [*prereqs, ""]))
+
+    sections.append(
+        Section(
+            "Review the settings",
+            [
+                f"`{tf}/terraform.tfvars` holds this deployment's settings: Region, base name,",
+                "upstream API URL and identity provider. None of them are secrets; commit the",
+                f"file. `{boot}/terraform.tfvars` holds the bootstrap settings"
+                + (": set `github_repository` to `owner/name`." if ci else "."),
+                "",
+            ],
+        )
+    )
+
+    if auth.create_cognito:
+        sections.append(
+            Section(
+                "Set up your identity provider",
+                [
+                    "Terraform creates an Amazon Cognito user pool with a machine-to-machine",
+                    "app client (OAuth client credentials) and allows only that client.",
+                    "After the first deploy, get a token from it (step 9). To use your own",
+                    f"provider instead, set `create_cognito = false` in `{tf}/terraform.tfvars`",
+                    "and fill in the `jwt_*` values; these work:",
+                    "",
+                    "| Provider | Discovery URL | What to allow |",
+                    "| --- | --- | --- |",
+                    *(f"| {n} | `{u}` | {h} |" for n, u, h in IDENTITY_PROVIDERS),
+                    "",
+                ],
+            )
+        )
+    else:
+        sections.append(
+            identity_provider_section(auth, f"`{tf}/terraform.tfvars` (`jwt_*`), then deploy again")
+        )
+
+    sections.append(
+        Section(
+            "Bootstrap AWS (once)",
+            [
+                "With administrator credentials, create the Terraform state bucket, the ECR",
+                "repository"
+                + (", the empty credentials secret" if credentials else "")
+                + (" and the GitHub deploy role" if ci else "")
+                + ":",
+                "",
+                *(
+                    shell(["deploy/scripts/bootstrap.sh"], ["./deploy/scripts/bootstrap.ps1"])
+                    if deployment.scripts
+                    else shell(
+                        [f"terraform -chdir={boot} init", f"terraform -chdir={boot} apply"],
+                        [f"terraform -chdir={boot} init", f"terraform -chdir={boot} apply"],
+                    )
+                ),
+                f"Keep `{boot}/terraform.tfstate` safe (it holds no secrets): Terraform needs",
+                "it to change or remove the bootstrap later.",
+                "",
+            ],
+        )
+    )
+
+    if credentials:
+        example = ", ".join(f'"{n}": "..."' for n in credentials)
+        put = (
+            f'aws secretsmanager put-secret-value --secret-id "$(terraform -chdir={boot} '
+            'output -raw api_secret_arn)" --secret-string file://api-credentials.json'
+        )
+        sections.append(
+            Section(
+                "Store the API credentials",
+                [
+                    "The server reads its upstream credentials from Secrets Manager at startup",
+                    "with its own IAM role; they never go into Terraform or environment",
+                    "variables. Write them to a local file `api-credentials.json` as",
+                    f"`{{{example}}}`, store them, then delete the file:",
+                    "",
+                    *shell(
+                        [put, "rm api-credentials.json"],
+                        [
+                            put.replace('"$(', "(").replace(')"', ")"),
+                            "Remove-Item api-credentials.json",
+                        ],
+                    ),
+                ],
+            )
+        )
+
+    if ci:
+        sections.append(
+            Section(
+                "Connect GitHub Actions",
+                [
+                    "In the repository settings:",
+                    "",
+                    "1. **Environments** → create `production` and add required reviewers, so",
+                    "   every deploy waits for approval.",
+                    "2. **Secrets and variables → Actions → Variables**, add (from the",
+                    f"   `terraform -chdir={boot} output` values):",
+                    "   - `AWS_DEPLOY_ROLE_ARN` = `deploy_role_arn`",
+                    "   - `AWS_REGION` = `aws_region`",
+                    "   - `TF_STATE_BUCKET` = `state_bucket`",
+                    "",
+                    "No AWS keys are stored: the workflow gets short-lived credentials through",
+                    "GitHub's OIDC token, and only jobs in the `production` environment of this",
+                    "repository can assume the role.",
+                    "",
+                ],
+            )
+        )
+
+    deploy_body: list[str] = []
+    if ci:
+        deploy_body += [
+            "Push to `main` (or run **Deploy to AgentCore** from the Actions tab). After",
+            "approval, `.github/workflows/deploy.yml` builds the ARM64 image, pushes it to",
+            "ECR tagged with the commit, and runs `terraform plan` and `apply`. The job",
+            "summary shows the MCP URL. `.github/workflows/ci.yml` runs the tests on every",
+            "push and pull request.",
+            "",
+        ]
+    if deployment.scripts:
+        deploy_body += [
+            ("Or deploy" if ci else "Deploy") + " from your machine with AWS credentials:",
+            "",
+            *shell(["deploy/scripts/deploy.sh"], ["./deploy/scripts/deploy.ps1"]),
+        ]
+    if not deployment.scripts and not ci:
+        deploy_body += [
+            "Build and push the image, then apply Terraform (bucket and repository from the",
+            "bootstrap outputs):",
+            "",
+            *shell(
+                [
+                    "docker buildx build --platform linux/arm64 --provenance=false --push "
+                    "--tag <ecr_repository_url>:<tag> .",
+                    f"terraform -chdir={tf} init -backend-config=backend.hcl",
+                    f'terraform -chdir={tf} apply -var "image_tag=<tag>"',
+                ],
+                [
+                    "docker buildx build --platform linux/arm64 --provenance=false --push "
+                    "--tag <ecr_repository_url>:<tag> .",
+                    f"terraform -chdir={tf} init -backend-config=backend.hcl",
+                    f'terraform -chdir={tf} apply -var "image_tag=<tag>"',
+                ],
+            ),
+        ]
+    deploy_body += [
+        "The runtime runs your image with `MCP_AUTH=platform`: AgentCore rejects requests",
+        "without a valid token before they reach the container.",
+        "",
+    ]
+    sections.append(Section("Deploy", deploy_body))
+
+    url_sh = f'"$(terraform -chdir={tf} output -raw mcp_url)"'
+    url_ps = f"(terraform -chdir={tf} output -raw mcp_url)"
+    verify_sh = f"python -m {pkg}.verify --url {url_sh}"
+    verify_ps = f"python -m {pkg}.verify --url {url_ps}"
+    if auth.create_cognito:
+        token_sh = [
+            f'TOKEN_URL="$(terraform -chdir={tf} output -raw cognito_token_url)"',
+            f'CLIENT_ID="$(terraform -chdir={tf} output -raw cognito_client_id)"',
+            f'CLIENT_SECRET="$(terraform -chdir={tf} output -raw cognito_client_secret)"',
+            'export MCP_BEARER_TOKEN="$(curl -s -u "$CLIENT_ID:$CLIENT_SECRET" -d '
+            "'grant_type=client_credentials&scope=mcp/invoke' \"$TOKEN_URL\" | "
+            'python -c \'import json,sys; print(json.load(sys.stdin)["access_token"])\')"',
+        ]
+        token_ps = [
+            f"$tokenUrl = terraform -chdir={tf} output -raw cognito_token_url",
+            f"$id = terraform -chdir={tf} output -raw cognito_client_id",
+            f"$secret = terraform -chdir={tf} output -raw cognito_client_secret",
+            '$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("${id}:${secret}"))',
+            "$env:MCP_BEARER_TOKEN = (Invoke-RestMethod -Method Post -Uri $tokenUrl "
+            '-Headers @{Authorization = "Basic $basic"} '
+            "-Body 'grant_type=client_credentials&scope=mcp/invoke').access_token",
+        ]
+        token_intro = "Get a token from the Cognito user pool (outputs `cognito_token_url`,"
+        token_intro2 = "`cognito_client_id`, `cognito_client_secret`), then check the server:"
+    else:
+        token_sh = ["export MCP_BEARER_TOKEN='<access token>'"]
+        token_ps = ["$env:MCP_BEARER_TOKEN = '<access token>'"]
+        token_intro = "Get an access token from your identity provider for an allowed audience,"
+        token_intro2 = "client or scope, then check that the server answers with its tools:"
+    sections.append(
+        Section(
+            "Verify",
+            [
+                token_intro,
+                token_intro2,
+                "",
+                *shell([*token_sh, verify_sh], [*token_ps, verify_ps]),
+                f"`terraform -chdir={tf} output -raw mcp_url` prints the URL MCP clients use.",
+                "",
+            ],
+        )
+    )
+
+    sections.append(
+        connect_section(
+            name,
+            "<mcp_url output>",
+            token=True,
+            note=[
+                "Replace `<mcp_url output>` with the full `mcp_url` value. Tokens expire;",
+                "get a new one when the client starts getting 401.",
+                "",
+            ],
+        )
+    )
+
+    sections.append(
+        Section(
+            "Update and roll back",
+            [
+                "- **Code or settings**: commit and push"
+                + (" (the workflow deploys)" if ci else "")
+                + (", or run the deploy script again" if deployment.scripts else "")
+                + ". Every deploy pushes a new, immutable image tag.",
+                f"- **Roll back** by applying an earlier tag: "
+                f'`terraform -chdir={tf} apply -var "image_tag=<earlier tag>"`.',
+                "- **Python packages** are pinned with hashes in `requirements-aws.lock` (the",
+                "  image) and `requirements.lock` (local use). To refresh them:",
+                "",
+                *shell([LOCK_REFRESH, LOCK_REFRESH_AWS], [LOCK_REFRESH, LOCK_REFRESH_AWS]),
+            ],
+        )
+    )
+
+    sections.append(
+        Section(
+            "Tear down",
+            [
+                *(
+                    shell(["deploy/scripts/destroy.sh"], ["./deploy/scripts/destroy.ps1"])
+                    if deployment.scripts
+                    else shell(
+                        [f'terraform -chdir={tf} destroy -var "image_tag=unused"'],
+                        [f'terraform -chdir={tf} destroy -var "image_tag=unused"'],
+                    )
+                ),
+                "This removes the runtime and its role. The bootstrap stays: to remove it,",
+                "empty the state bucket and the ECR repository, then run",
+                f"`terraform -chdir={boot} destroy`.",
+                "",
+            ],
+        )
+    )
+
+    trouble = [
+        "| Symptom | Fix |",
+        "| --- | --- |",
+        "| `verify` gets 401 | The token is missing, expired, or not from the configured "
+        "provider; check the discovery URL and get a new token. |",
+        "| `verify` gets 403 | The token's audience, client or scopes are not in the allowed "
+        f"lists in `{tf}/terraform.tfvars`. |",
+        "| The runtime does not start | Read its logs in CloudWatch under "
+        "`/aws/bedrock-agentcore/runtimes/`. `Cannot start:` lines name the setting to fix. |",
+        "| `exec format error` in the logs | The image is not ARM64: build with "
+        "`--platform linux/arm64`. |",
+        "| `terraform apply` fails right after the role is created | IAM changes take a few "
+        "seconds to reach AgentCore; run apply again. |",
+        "| `ImageTagAlreadyExistsException` | ECR tags are immutable: deploy with a new tag. |",
+    ]
+    if credentials:
+        trouble.insert(
+            4,
+            "| Logs say the secret `does not exist or has no value yet` | Store the credentials "
+            "(step 5). |",
+        )
+    sections.append(Section("Troubleshooting", [*trouble, ""]))
+
+    intro = [
+        f"How to run **{title}** on AWS Bedrock AgentCore Runtime. Each step shows the",
+        "commands for bash (macOS, Linux, WSL, Git Bash) and PowerShell.",
+    ]
+    return render(f"Deploy {title} to AWS Bedrock AgentCore", intro, sections)
+
+
+# requirements.txt plus boto3, read from stdin ("-"): works the same in bash and PowerShell.
+LOCK_REFRESH_AWS = (
+    'echo "boto3>=1.35,<2" | uv pip compile requirements.txt - --universal --generate-hashes '
+    "--python-version 3.11 --output-file requirements-aws.lock"
+)

@@ -160,3 +160,147 @@ def docker_scripts(caps: ServerCapabilities) -> list[FileEntry]:
         _sh("stop", *stop, ["docker compose down"]),
         _ps1("stop", *stop, ["docker compose down", _ps_check()]),
     ]
+
+
+_BOOT = "deploy/terraform/bootstrap"
+_MAIN = "deploy/terraform"
+
+
+def _backend_args(name: str) -> str:
+    """-backend-config flags for the main module's S3 state. The same text works in sh
+    and PowerShell: both expand $bucket and $region inside double quotes."""
+    parts = [
+        "bucket=$bucket",
+        f"key={name}/terraform.tfstate",
+        "region=$region",
+        "use_lockfile=true",
+        "encrypt=true",
+    ]
+    return " ".join(f'-backend-config="{part}"' for part in parts)
+
+
+def agentcore_scripts(caps: ServerCapabilities, *, name: str) -> list[FileEntry]:
+    """bootstrap / deploy / destroy for the AgentCore container target."""
+    boot = (
+        "One-time setup with administrator credentials: state bucket, ECR repository, deploy role.",
+        "",
+    )
+    deploy = (
+        "Build the ARM64 image, push it to ECR, then apply Terraform.",
+        " [image-tag]",
+    )
+    destroy = (
+        "Delete the AgentCore runtime, its role and secret (the bootstrap is kept).",
+        "",
+    )
+    placeholder = "Set github_repository in deploy/terraform/bootstrap/terraform.tfvars first."
+    keep = (
+        "The bootstrap (state bucket, ECR repository, deploy role) is kept. To remove it, "
+        f"empty the bucket and repository, then: terraform -chdir={_BOOT} destroy"
+    )
+    sh_outputs = [
+        f'region="$(terraform -chdir={_BOOT} output -raw aws_region)"',
+        f'bucket="$(terraform -chdir={_BOOT} output -raw state_bucket)"',
+    ]
+    ps_outputs = [
+        f"$region = terraform -chdir={_BOOT} output -raw aws_region",
+        _ps_check(),
+        f"$bucket = terraform -chdir={_BOOT} output -raw state_bucket",
+        _ps_check(),
+    ]
+    sh_init = f"terraform -chdir={_MAIN} init -input=false -reconfigure {_backend_args(name)}"
+    ps_init = f"terraform -chdir={_MAIN} init -input=false -reconfigure {_backend_args(name)}"
+    return [
+        _sh(
+            "bootstrap",
+            *boot,
+            [
+                f"if grep -q 'OWNER/REPOSITORY' {_BOOT}/terraform.tfvars; then",
+                f'  echo "{placeholder}" >&2',
+                "  exit 1",
+                "fi",
+                f"terraform -chdir={_BOOT} init -input=false",
+                f"terraform -chdir={_BOOT} apply -input=false",
+                f"terraform -chdir={_BOOT} output",
+                'echo "Next: DEPLOY.md, steps after Bootstrap."',
+            ],
+        ),
+        _ps1(
+            "bootstrap",
+            *boot,
+            [
+                f"if (Select-String -Path {_BOOT}/terraform.tfvars -Pattern 'OWNER/REPOSITORY' "
+                "-Quiet) {",
+                f"    [Console]::Error.WriteLine('{placeholder}')",
+                "    exit 1",
+                "}",
+                f"terraform -chdir={_BOOT} init -input=false",
+                _ps_check(),
+                f"terraform -chdir={_BOOT} apply -input=false",
+                _ps_check(),
+                f"terraform -chdir={_BOOT} output",
+                "Write-Host 'Next: DEPLOY.md, steps after Bootstrap.'",
+            ],
+        ),
+        _sh(
+            "deploy",
+            *deploy,
+            [
+                *sh_outputs,
+                f'repo="$(terraform -chdir={_BOOT} output -raw ecr_repository_url)"',
+                "# ECR tags are immutable, so every deploy gets a new tag.",
+                'tag="${1:-$(date -u +%Y%m%d%H%M%S)}"',
+                'aws ecr get-login-password --region "$region" | '
+                'docker login --username AWS --password-stdin "${repo%%/*}"',
+                "docker buildx build --platform linux/arm64 --provenance=false --sbom=false "
+                '--push --tag "$repo:$tag" .',
+                sh_init,
+                f'terraform -chdir={_MAIN} apply -input=false -var "image_tag=$tag"',
+                f'echo "MCP URL: $(terraform -chdir={_MAIN} output -raw mcp_url)"',
+            ],
+        ),
+        _ps1(
+            "deploy",
+            *deploy,
+            [
+                "param([string]$Tag = (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))",
+                *ps_outputs,
+                f"$repo = terraform -chdir={_BOOT} output -raw ecr_repository_url",
+                _ps_check(),
+                "# ECR tags are immutable, so every deploy gets a new tag.",
+                "aws ecr get-login-password --region $region | "
+                "docker login --username AWS --password-stdin $repo.Split('/')[0]",
+                _ps_check(),
+                "docker buildx build --platform linux/arm64 --provenance=false --sbom=false "
+                '--push --tag "${repo}:$Tag" .',
+                _ps_check(),
+                ps_init,
+                _ps_check(),
+                f'terraform -chdir={_MAIN} apply -input=false -var "image_tag=$Tag"',
+                _ps_check(),
+                f'Write-Host "MCP URL: $(terraform -chdir={_MAIN} output -raw mcp_url)"',
+            ],
+        ),
+        _sh(
+            "destroy",
+            *destroy,
+            [
+                *sh_outputs,
+                sh_init,
+                f'terraform -chdir={_MAIN} destroy -input=false -var "image_tag=unused"',
+                f'echo "{keep}"',
+            ],
+        ),
+        _ps1(
+            "destroy",
+            *destroy,
+            [
+                *ps_outputs,
+                ps_init,
+                _ps_check(),
+                f'terraform -chdir={_MAIN} destroy -input=false -var "image_tag=unused"',
+                _ps_check(),
+                f"Write-Host '{keep}'",
+            ],
+        ),
+    ]

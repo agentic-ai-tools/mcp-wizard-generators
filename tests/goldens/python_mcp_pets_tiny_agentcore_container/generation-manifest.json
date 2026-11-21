@@ -1,0 +1,31 @@
+{
+  "target": "agentcore-container",
+  "language": "python",
+  "sdk": "mcp (official Python SDK; MCPServer high-level API, mcp>=2,<3)",
+  "title": "Pets Tiny API",
+  "version": "1.0.0",
+  "package": "pets_tiny_mcp",
+  "tools": [
+    {
+      "name": "listpets",
+      "operationId": "listPets",
+      "method": "get",
+      "path": "/pets"
+    },
+    {
+      "name": "showpetbyid",
+      "operationId": "showPetById",
+      "method": "get",
+      "path": "/pets/{petId}"
+    }
+  ],
+  "security": {
+    "authMode": "api_key",
+    "secretsStrategy": "dotenv_example_only",
+    "apiKey": {
+      "location": "header",
+      "name": "X-API-Key"
+    }
+  },
+  "findings": []
+}
