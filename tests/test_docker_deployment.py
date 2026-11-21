@@ -7,7 +7,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -21,6 +20,7 @@ from types import ModuleType
 import pytest
 import yaml
 
+from lint_harness import docker_linux
 from mcp_wizard_generators.models import (
     DeploymentConfig,
     InboundAuthConfig,
@@ -448,19 +448,9 @@ def test_generated_jwt_tests_pass(tmp_path: Path) -> None:
 
 @pytest.mark.e2e
 def test_docker_image_builds_and_serves_over_http(tmp_path: Path) -> None:
-    if not shutil.which("docker"):
-        pytest.skip("docker not installed")
-    info = subprocess.run(
-        ["docker", "info", "--format", "{{.OSType}}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if info.returncode:
-        pytest.skip("docker daemon not running")
-    if info.stdout.strip() != "linux":
+    if not docker_linux():
         # GitHub's Windows runners run Windows containers and cannot pull Linux images.
-        pytest.skip(f"docker runs {info.stdout.strip() or 'unknown'} containers, not linux")
+        pytest.skip("needs Docker with Linux containers")
     project = tmp_path / "pets"
     generate(
         IntermediateRep.from_dict(IR),
