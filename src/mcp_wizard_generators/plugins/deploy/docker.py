@@ -103,8 +103,6 @@ def dockerfile(
     module = caps.entrypoint.split(":", 1)[0].rsplit(".", 1)[0]
     port = CONTAINER_PORT
     base = f"--platform={platform} {PYTHON_IMAGE}" if platform else PYTHON_IMAGE
-    # hadolint (DL3029) prefers --platform at build time; the pin is deliberate, so even
-    # a plain `docker build` produces the only architecture the target runs.
     pin = (
         f"# {platform} is the only architecture this target runs: pinned on purpose.\n"
         "# hadolint ignore=DL3029\n"
