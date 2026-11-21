@@ -183,7 +183,11 @@ def test_no_secret_resource_without_upstream_credentials() -> None:
 
 
 def _terraform() -> str | None:
-    return shutil.which("terraform")
+    found = shutil.which("terraform")
+    if not found and os.environ.get("REQUIRE_TERRAFORM"):
+        # CI sets this so a missing install fails instead of silently skipping.
+        pytest.fail("terraform is required (REQUIRE_TERRAFORM is set) but not on PATH")
+    return found
 
 
 def test_terraform_files_are_formatted(tmp_path: Path) -> None:
