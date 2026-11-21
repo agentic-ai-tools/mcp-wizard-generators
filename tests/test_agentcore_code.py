@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from lint_harness import docker_linux
 from mcp_wizard_generators.models import (
     DeploymentConfig,
     InboundAuthConfig,
@@ -39,8 +40,6 @@ ENTRY = "deploy/agentcore/main.py"
 SCRIPTS = [
     f"deploy/scripts/{n}.{e}" for n in ("bootstrap", "deploy", "destroy") for e in ("sh", "ps1")
 ]
-ACTIONLINT_IMAGE = "rhysd/actionlint:1.7.12"
-SHELLCHECK_IMAGE = "koalaman/shellcheck:v0.11.0"
 # ELF e_machine for AArch64.
 EM_AARCH64 = 183
 
@@ -170,51 +169,6 @@ def test_container_terraform_is_unchanged_by_the_code_target() -> None:
     files = _files(_config(target="agentcore-container"))
     assert "container_configuration {" in files[f"{TF}/main.tf"]
     assert '"code"' not in files[f"{TF}/bootstrap/main.tf"]
-
-
-def _terraform() -> str | None:
-    found = shutil.which("terraform")
-    if not found and os.environ.get("REQUIRE_TERRAFORM"):
-        pytest.fail("terraform is required (REQUIRE_TERRAFORM is set) but not on PATH")
-    return found
-
-
-def test_terraform_files_are_formatted(tmp_path: Path) -> None:
-    if not _terraform():
-        pytest.skip("terraform not installed")
-    for deployment in (_config(ci="github-actions"), _config(inbound_auth=COGNITO)):
-        out = tmp_path / ("c" if deployment.inbound_auth.create_cognito else "j")
-        _tree(deployment).write_to(out)
-        proc = subprocess.run(
-            ["terraform", "fmt", "-check", "-diff", "-recursive", str(out / TF)],
-            capture_output=True,
-            text=True,
-        )
-        assert proc.returncode == 0, proc.stdout + proc.stderr
-
-
-@pytest.mark.e2e
-@pytest.mark.parametrize("auth", [JWT, COGNITO], ids=["jwt", "cognito"])
-def test_terraform_validates(
-    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, auth: InboundAuthConfig
-) -> None:
-    if not _terraform():
-        pytest.skip("terraform not installed")
-    _tree(_config(inbound_auth=auth, ci="github-actions")).write_to(tmp_path)
-    env = {**os.environ, "TF_IN_AUTOMATION": "1"}
-    cache = tmp_path_factory.getbasetemp() / "terraform-plugin-cache"
-    cache.mkdir(exist_ok=True)
-    env.setdefault("TF_PLUGIN_CACHE_DIR", str(cache))
-    for folder in (tmp_path / TF, tmp_path / TF / "bootstrap"):
-        for cmd in (["init", "-backend=false", "-input=false"], ["validate", "-no-color"]):
-            proc = subprocess.run(
-                ["terraform", f"-chdir={folder}", *cmd],
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=600,
-            )
-            assert proc.returncode == 0, (folder.name, cmd, proc.stdout, proc.stderr)
 
 
 # ---- GitHub Actions -----------------------------------------------------------------
@@ -412,12 +366,7 @@ def test_package_is_reproducible(built_zip: tuple[Path, str], tmp_path: Path) ->
 
 
 def _docker_arm64() -> bool:
-    if not shutil.which("docker"):
-        return False
-    info = subprocess.run(
-        ["docker", "info", "--format", "{{.OSType}}"], capture_output=True, text=True
-    )
-    if info.returncode != 0 or info.stdout.strip() != "linux":
+    if not docker_linux():
         return False
     probe = subprocess.run(
         ["docker", "run", "--rm", "--platform", "linux/arm64", "busybox:1.37", "true"],
@@ -486,40 +435,3 @@ def test_package_serves_mcp_on_arm64(built_zip: tuple[Path, str], tmp_path: Path
         assert "listpets" in verify.stdout
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-
-
-# ---- external linters ---------------------------------------------------------------
-
-
-def _docker_linux() -> bool:
-    if not shutil.which("docker"):
-        return False
-    info = subprocess.run(
-        ["docker", "info", "--format", "{{.OSType}}"], capture_output=True, text=True
-    )
-    return info.returncode == 0 and info.stdout.strip() == "linux"
-
-
-@pytest.mark.e2e
-def test_actionlint_and_shellcheck_pass(tmp_path: Path) -> None:
-    if not _docker_linux():
-        pytest.skip("needs Docker with Linux containers")
-    _tree(_config(ci="github-actions", scripts=True)).write_to(tmp_path)
-    mount = f"{tmp_path.resolve()}:/repo"
-    user = ["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []
-    workflows = [".github/workflows/ci.yml", ".github/workflows/deploy.yml"]
-    lint = subprocess.run(
-        ["docker", "run", "--rm", *user, "-v", mount, "-w", "/repo", ACTIONLINT_IMAGE, *workflows],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    assert lint.returncode == 0, lint.stdout + lint.stderr
-    scripts = [f"/repo/{p}" for p in SCRIPTS if p.endswith(".sh")]
-    check = subprocess.run(
-        ["docker", "run", "--rm", *user, "-v", mount, SHELLCHECK_IMAGE, *scripts],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    assert check.returncode == 0, check.stdout + check.stderr

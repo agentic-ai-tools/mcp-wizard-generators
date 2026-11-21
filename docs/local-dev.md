@@ -41,6 +41,17 @@ make clean
 
 `make e2e` is opt-in and is not part of `make test`. It needs network access: it generates the pets MCP project, installs it into a fresh virtualenv from its `requirements.lock` (`--require-hashes`), starts `python -m pets_tiny_mcp` over stdio, calls `listpets` through the MCP client against a local mock API, then runs the generated project's own `tests/` in that venv (plus a Petstore project with an API key in the query). `make test` and tox pass `-m "not e2e"` so that install stays out of the fast suite.
 
+`make e2e` also checks the deployment targets (design ADR-026). Each check skips when its tool is missing:
+
+| Check | Needs |
+| --- | --- |
+| actionlint, shellcheck and hadolint run over every target and option combination (`tests/test_generated_assets_lint.py`; images pinned by digest in `tests/lint_harness.py`) | Docker with Linux containers |
+| `terraform fmt`, `init -backend=false` and `validate` for the AgentCore modules | Terraform 1.10+ |
+| The docker target is built and called over HTTP | Docker with Linux containers |
+| The `agentcore-code` zip is built and run in an ARM64 container | uv (a dev dependency); Docker that can run `linux/arm64` (Docker Desktop can; on Linux, install QEMU binfmt) |
+
+CI sets `REQUIRE_TERRAFORM`, `REQUIRE_UV`, `REQUIRE_LINUX_DOCKER` and `REQUIRE_ARM64_DOCKER` (the last two on Linux only). With these set, a missing tool fails the run instead of skipping.
+
 ## Dual helpers
 
 | Task | POSIX (`*.sh`) | PowerShell (`*.ps1`) |

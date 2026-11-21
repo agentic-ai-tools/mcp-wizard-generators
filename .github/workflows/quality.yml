@@ -128,6 +128,8 @@ jobs:
           REQUIRE_TERRAFORM: "1"
           REQUIRE_UV: "1"
           REQUIRE_ARM64_DOCKER: ${{ runner.os == 'Linux' && '1' || '' }}
+          # Linters (actionlint, shellcheck, hadolint) run in Linux containers.
+          REQUIRE_LINUX_DOCKER: ${{ runner.os == 'Linux' && '1' || '' }}
         run: python -m pytest -m e2e -p no:cacheprovider
 
   semgrep:

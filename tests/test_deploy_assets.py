@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -25,8 +24,6 @@ SCRIPTS = [
     f"deploy/scripts/{name}.{ext}" for name in ("build", "run", "stop") for ext in ("sh", "ps1")
 ]
 # Linters for the generated files, run through their official images.
-ACTIONLINT_IMAGE = "rhysd/actionlint:1.7.12"
-SHELLCHECK_IMAGE = "koalaman/shellcheck:v0.11.0"
 
 
 def _tree(deployment: DeploymentConfig):
@@ -252,59 +249,6 @@ def test_deploy_md_explains_changing_the_host_port() -> None:
     deploy = _files(DeploymentConfig(target="docker"))["DEPLOY.md"]
     assert "MCP_HOST_PORT" in deploy and "port is already allocated" in deploy
     assert "127.0.0.1" in deploy and "does not check tokens" in deploy
-
-
-# ---- external linters (Docker images; not part of `make test`) ----------------------
-
-
-def _docker_linux() -> bool:
-    if not shutil.which("docker"):
-        return False
-    info = subprocess.run(
-        ["docker", "info", "--format", "{{.OSType}}"], capture_output=True, text=True
-    )
-    return info.returncode == 0 and info.stdout.strip() == "linux"
-
-
-@pytest.mark.e2e
-def test_actionlint_and_shellcheck_pass(tmp_path: Path, full: dict[str, str]) -> None:
-    if not _docker_linux():
-        pytest.skip("needs Docker with Linux containers")
-    tree = _tree(
-        DeploymentConfig(target="docker", ci="github-actions", scripts=True, inbound_auth=JWT)
-    )
-    tree.write_to(tmp_path)
-    mount = f"{tmp_path.resolve()}:/repo"
-    # pytest's tmp dirs are private (0700) on POSIX; run the linters as this user so they
-    # can read the mount. Docker Desktop on Windows does not apply host permissions.
-    user = ["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []
-    actionlint = subprocess.run(
-        [
-            "docker",
-            "run",
-            "--rm",
-            *user,
-            "-v",
-            mount,
-            "-w",
-            "/repo",
-            ACTIONLINT_IMAGE,
-            ".github/workflows/ci.yml",
-            ".github/workflows/release.yml",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    assert actionlint.returncode == 0, actionlint.stdout + actionlint.stderr
-    scripts = [f"/repo/{p}" for p in SCRIPTS if p.endswith(".sh")]
-    shellcheck = subprocess.run(
-        ["docker", "run", "--rm", *user, "-v", mount, SHELLCHECK_IMAGE, *scripts],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    assert shellcheck.returncode == 0, shellcheck.stdout + shellcheck.stderr
 
 
 def test_written_files_keep_lf_line_endings_on_every_os(tmp_path: Path) -> None:
