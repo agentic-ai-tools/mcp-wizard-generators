@@ -106,9 +106,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      # Validates the generated AgentCore Terraform (ADR-026).
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+
       # Installs a generated project from requirements.lock (--require-hashes)
-      # into a fresh venv and calls a tool over stdio.
+      # into a fresh venv and calls a tool over stdio. REQUIRE_TERRAFORM turns
+      # a missing terraform into a failure instead of a silent skip.
       - name: Pytest e2e
+        env:
+          REQUIRE_TERRAFORM: "1"
         run: python -m pytest -m e2e -p no:cacheprovider
 
   semgrep:

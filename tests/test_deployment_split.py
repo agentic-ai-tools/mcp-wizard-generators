@@ -142,7 +142,7 @@ def test_agentcore_stub_plugin_is_gone() -> None:
 
 def test_unknown_deployment_lists_registered_ones() -> None:
     with pytest.raises(KeyError, match="local"):
-        get_default_registry().deployment("agentcore-container")
+        get_default_registry().deployment("agentcore-code")
 
 
 # ---- pipeline composition -----------------------------------------------------------

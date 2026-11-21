@@ -45,9 +45,9 @@ def _normalize(content: str) -> str:
 
 
 def golden_view(path: str, content: str) -> str:
-    """What a golden stores. The lock keeps only its header: the pins change with every
-    dependency bump and are checked against the packaged lock in test_python_mcp_lock."""
-    if path == "requirements.lock":
+    """What a golden stores. Locks keep only their header: the pins change with every
+    dependency bump and are checked against the packaged locks in test_python_mcp_lock."""
+    if path in ("requirements.lock", "requirements-aws.lock"):
         return content.split("\n\n", 1)[0] + "\n"
     return content
 
@@ -230,3 +230,46 @@ def test_python_mcp_docker_jwt_golden() -> None:
         actual = golden_view(entry.path, _normalize(entry.content))
         expected = _normalize((golden_dir / entry.path).read_text(encoding="utf-8"))
         assert actual == expected, f"content drift: {DOCKER_JWT_GOLDEN}/{entry.path}"
+
+
+AGENTCORE_GOLDEN = "python_mcp_pets_tiny_agentcore_container"
+
+
+def agentcore_result():
+    """AgentCore container: API key from Secrets Manager, any-OIDC JWT, CI and scripts."""
+    from mcp_wizard_generators.models import DeploymentConfig, InboundAuthConfig
+
+    ir = IntermediateRep.from_dict(json.loads(FIXTURE.read_text(encoding="utf-8")))
+    return generate_python_mcp_result(
+        ir,
+        ["listPets", "showPetById"],
+        package_name="pets_tiny_mcp",
+        security={"authMode": "api_key", "apiKey": {"location": "header", "name": "X-API-Key"}},
+        deployment=DeploymentConfig(
+            target="agentcore-container",
+            iac="terraform",
+            ci="github-actions",
+            scripts=True,
+            aws_region="us-east-1",
+            inbound_auth=InboundAuthConfig(
+                mode="jwt",
+                discovery_url="https://login.example.com/tenant/.well-known/openid-configuration",
+                allowed_audiences=("api://pets",),
+            ),
+        ),
+    )
+
+
+def test_python_mcp_agentcore_container_golden() -> None:
+    result = agentcore_result()
+    golden_dir = ROOT / "goldens" / AGENTCORE_GOLDEN
+    expected_paths = sorted(
+        str(p.relative_to(golden_dir)).replace("\\", "/")
+        for p in golden_dir.rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts
+    )
+    assert result.tree.paths() == expected_paths
+    for entry in result.tree.entries:
+        actual = golden_view(entry.path, _normalize(entry.content))
+        expected = _normalize((golden_dir / entry.path).read_text(encoding="utf-8"))
+        assert actual == expected, f"content drift: {AGENTCORE_GOLDEN}/{entry.path}"
