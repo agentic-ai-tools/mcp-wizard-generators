@@ -1,0 +1,7 @@
+# terraform -chdir=deploy/terraform init -backend-config=backend.hcl
+# The bucket name is the state_bucket output of deploy/terraform/bootstrap.
+bucket       = "<state_bucket output of bootstrap>"
+key          = "pets-tiny-mcp/terraform.tfstate"
+region       = "us-east-1"
+use_lockfile = true
+encrypt      = true

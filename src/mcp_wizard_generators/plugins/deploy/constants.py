@@ -49,7 +49,12 @@ ACTIONS = {
     "hashicorp/setup-terraform": (
         "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1"
     ),
+    "astral-sh/setup-uv": "astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0",
 }
+
+# uv installed by generated workflows (the agentcore-code package script needs it:
+# unlike pip, it evaluates the lock's markers for the target platform).
+UV_VERSION = "0.13.9"
 
 # Terraform used by generated workflows, and the AWS provider range generated modules
 # accept. 6.73 is the version the AgentCore runtime resource was validated against.
@@ -59,3 +64,9 @@ AWS_PROVIDER_VERSION = "~> 6.73"
 AGENTCORE_PLATFORM = "linux/arm64"
 # Python versions the generated CI tests on (oldest and newest supported).
 CI_PYTHON_VERSIONS = ("3.11", "3.13")
+
+# Direct code deployment (agentcore-code): the AgentCore managed runtime and the
+# matching wheel target. 3.10 and 3.11 are past their AgentCore deprecation dates.
+AGENTCORE_CODE_RUNTIME = "PYTHON_3_13"
+AGENTCORE_CODE_PYTHON = "3.13"
+AGENTCORE_CODE_PLATFORM = "aarch64-manylinux2014"

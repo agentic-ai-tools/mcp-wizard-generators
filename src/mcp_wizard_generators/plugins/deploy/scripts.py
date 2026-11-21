@@ -179,15 +179,21 @@ def _backend_args(name: str) -> str:
     return " ".join(f'-backend-config="{part}"' for part in parts)
 
 
-def agentcore_scripts(caps: ServerCapabilities, *, name: str) -> list[FileEntry]:
-    """bootstrap / deploy / destroy for the AgentCore container target."""
+def agentcore_scripts(
+    caps: ServerCapabilities, *, name: str, code: bool = False
+) -> list[FileEntry]:
+    """bootstrap / deploy / destroy for the AgentCore targets. ``code``: package a zip
+    and upload it to S3 (agentcore-code) instead of building an image."""
+    store = "code bucket" if code else "ECR repository"
     boot = (
-        "One-time setup with administrator credentials: state bucket, ECR repository, deploy role.",
+        f"One-time setup with administrator credentials: state bucket, {store}, deploy role.",
         "",
     )
     deploy = (
-        "Build the ARM64 image, push it to ECR, then apply Terraform.",
-        " [image-tag]",
+        "Package the server as an ARM64 zip, upload it to S3, then apply Terraform."
+        if code
+        else "Build the ARM64 image, push it to ECR, then apply Terraform.",
+        "" if code else " [image-tag]",
     )
     destroy = (
         "Delete the AgentCore runtime, its role and secret (the bootstrap is kept).",
@@ -195,9 +201,11 @@ def agentcore_scripts(caps: ServerCapabilities, *, name: str) -> list[FileEntry]
     )
     placeholder = "Set github_repository in deploy/terraform/bootstrap/terraform.tfvars first."
     keep = (
-        "The bootstrap (state bucket, ECR repository, deploy role) is kept. To remove it, "
-        f"empty the bucket and repository, then: terraform -chdir={_BOOT} destroy"
+        f"The bootstrap (state bucket, {store}, deploy role) is kept. To remove it, "
+        + ("empty both buckets" if code else "empty the bucket and repository")
+        + f", then: terraform -chdir={_BOOT} destroy"
     )
+    unused = '"code_key=code/unused.zip"' if code else '"image_tag=unused"'
     sh_outputs = [
         f'region="$(terraform -chdir={_BOOT} output -raw aws_region)"',
         f'bucket="$(terraform -chdir={_BOOT} output -raw state_bucket)"',
@@ -245,7 +253,9 @@ def agentcore_scripts(caps: ServerCapabilities, *, name: str) -> list[FileEntry]
         _sh(
             "deploy",
             *deploy,
-            [
+            _code_deploy_sh(sh_outputs, sh_init)
+            if code
+            else [
                 *sh_outputs,
                 f'repo="$(terraform -chdir={_BOOT} output -raw ecr_repository_url)"',
                 "# ECR tags are immutable, so every deploy gets a new tag.",
@@ -262,7 +272,9 @@ def agentcore_scripts(caps: ServerCapabilities, *, name: str) -> list[FileEntry]
         _ps1(
             "deploy",
             *deploy,
-            [
+            _code_deploy_ps1(ps_outputs, ps_init)
+            if code
+            else [
                 "param([string]$Tag = (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))",
                 *ps_outputs,
                 f"$repo = terraform -chdir={_BOOT} output -raw ecr_repository_url",
@@ -287,7 +299,7 @@ def agentcore_scripts(caps: ServerCapabilities, *, name: str) -> list[FileEntry]
             [
                 *sh_outputs,
                 sh_init,
-                f'terraform -chdir={_MAIN} destroy -input=false -var "image_tag=unused"',
+                f"terraform -chdir={_MAIN} destroy -input=false -var {unused}",
                 f'echo "{keep}"',
             ],
         ),
@@ -298,9 +310,43 @@ def agentcore_scripts(caps: ServerCapabilities, *, name: str) -> list[FileEntry]
                 *ps_outputs,
                 ps_init,
                 _ps_check(),
-                f'terraform -chdir={_MAIN} destroy -input=false -var "image_tag=unused"',
+                f"terraform -chdir={_MAIN} destroy -input=false -var {unused}",
                 _ps_check(),
                 f"Write-Host '{keep}'",
             ],
         ),
+    ]
+
+
+_ZIP = "deploy/agentcore/build/agentcore-code.zip"
+
+
+def _code_deploy_sh(outputs: list[str], init: str) -> list[str]:
+    return [
+        *outputs,
+        f'code_bucket="$(terraform -chdir={_BOOT} output -raw code_bucket)"',
+        "# The key is the zip's SHA-256 (code/<sha256>.zip): unchanged code, same key.",
+        'key="$("${PYTHON:-python3}" deploy/agentcore/package.py)"',
+        f'aws s3 cp {_ZIP} "s3://$code_bucket/$key" --region "$region"',
+        init,
+        f'terraform -chdir={_MAIN} apply -input=false -var "code_key=$key"',
+        f'echo "MCP URL: $(terraform -chdir={_MAIN} output -raw mcp_url)"',
+    ]
+
+
+def _code_deploy_ps1(outputs: list[str], init: str) -> list[str]:
+    return [
+        *outputs,
+        f"$codeBucket = terraform -chdir={_BOOT} output -raw code_bucket",
+        _ps_check(),
+        "# The key is the zip's SHA-256 (code/<sha256>.zip): unchanged code, same key.",
+        "$key = python deploy/agentcore/package.py | Select-Object -Last 1",
+        _ps_check(),
+        f'aws s3 cp {_ZIP} "s3://$codeBucket/$key" --region $region',
+        _ps_check(),
+        init,
+        _ps_check(),
+        f'terraform -chdir={_MAIN} apply -input=false -var "code_key=$key"',
+        _ps_check(),
+        f'Write-Host "MCP URL: $(terraform -chdir={_MAIN} output -raw mcp_url)"',
     ]

@@ -113,12 +113,21 @@ jobs:
           terraform_version: "1.17.2"
           terraform_wrapper: false
 
+      # Runs the agentcore-code zip in an ARM64 container (ADR-026).
+      - name: Set up QEMU (ARM64 containers)
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
       # Installs a generated project from requirements.lock (--require-hashes)
-      # into a fresh venv and calls a tool over stdio. REQUIRE_TERRAFORM turns
-      # a missing terraform into a failure instead of a silent skip.
+      # into a fresh venv and calls a tool over stdio. The REQUIRE_* variables
+      # turn a missing tool into a failure instead of a silent skip.
       - name: Pytest e2e
         env:
           REQUIRE_TERRAFORM: "1"
+          REQUIRE_UV: "1"
+          REQUIRE_ARM64_DOCKER: ${{ runner.os == 'Linux' && '1' || '' }}
         run: python -m pytest -m e2e -p no:cacheprovider
 
   semgrep:

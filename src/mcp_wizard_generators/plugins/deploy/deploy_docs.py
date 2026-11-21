@@ -351,8 +351,11 @@ def docker_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, jwt: boo
     return render(f"Deploy {title} with Docker", intro, sections)
 
 
-def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name: str) -> str:
-    """Step-by-step deployment to AWS Bedrock AgentCore Runtime (container target)."""
+def agentcore_deploy_md(
+    ctx: GenerateContext, caps: ServerCapabilities, *, name: str, code: bool = False
+) -> str:
+    """Step-by-step deployment to AWS Bedrock AgentCore Runtime. ``code``: direct code
+    deployment (a zip in S3) instead of a container image in ECR."""
     deployment = ctx.deployment
     auth = deployment.inbound_auth
     pkg = caps.package_name
@@ -362,14 +365,27 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
     boot = f"{tf}/bootstrap"
     title = one_line(ctx.ir.title)
     sections: list[Section] = []
+    unused = '"code_key=code/unused.zip"' if code else '"image_tag=unused"'
 
     prereqs = [
         "- An AWS account, in a Region where Amazon Bedrock AgentCore is available, and",
         "  administrator credentials for the one-time bootstrap (`aws sts get-caller-identity`).",
-        "- AWS CLI v2, Terraform 1.10 or newer, and Docker with `buildx` (Docker Desktop",
-        "  includes it). Images are built for `linux/arm64`, which AgentCore requires.",
-        "- Python 3.11+ for the `verify` check (`pip install -r requirements.txt`, then",
-        "  `pip install --no-deps -e .`).",
+        *(
+            [
+                "- AWS CLI v2, Terraform 1.10 or newer, and [uv](https://docs.astral.sh/uv/).",
+                "  `deploy/agentcore/package.py` uses uv to fetch `linux/arm64` wheels (which",
+                "  AgentCore requires) from the hash-checked lock on any OS.",
+                "- Python 3.11+ for the package script and the `verify` check",
+                "  (`pip install -r requirements.txt`, then `pip install --no-deps -e .`).",
+            ]
+            if code
+            else [
+                "- AWS CLI v2, Terraform 1.10 or newer, and Docker with `buildx` (Docker Desktop",
+                "  includes it). Images are built for `linux/arm64`, which AgentCore requires.",
+                "- Python 3.11+ for the `verify` check (`pip install -r requirements.txt`, then",
+                "  `pip install --no-deps -e .`).",
+            ]
+        ),
     ]
     if not auth.create_cognito:
         prereqs.append("- An OIDC identity provider that issues access tokens (step 3).")
@@ -417,8 +433,9 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
         Section(
             "Bootstrap AWS (once)",
             [
-                "With administrator credentials, create the Terraform state bucket, the ECR",
-                "repository"
+                "With administrator credentials, create the Terraform state bucket, the "
+                + ("code" if code else "ECR"),
+                ("bucket" if code else "repository")
                 + (", the empty credentials secret" if credentials else "")
                 + (" and the GitHub deploy role" if ci else "")
                 + ":",
@@ -478,6 +495,7 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
                     "   - `AWS_DEPLOY_ROLE_ARN` = `deploy_role_arn`",
                     "   - `AWS_REGION` = `aws_region`",
                     "   - `TF_STATE_BUCKET` = `state_bucket`",
+                    *(["   - `CODE_BUCKET` = `code_bucket`"] if code else []),
                     "",
                     "No AWS keys are stored: the workflow gets short-lived credentials through",
                     "GitHub's OIDC token, and only jobs in the `production` environment of this",
@@ -491,10 +509,21 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
     if ci:
         deploy_body += [
             "Push to `main` (or run **Deploy to AgentCore** from the Actions tab). After",
-            "approval, `.github/workflows/deploy.yml` builds the ARM64 image, pushes it to",
-            "ECR tagged with the commit, and runs `terraform plan` and `apply`. The job",
-            "summary shows the MCP URL. `.github/workflows/ci.yml` runs the tests on every",
-            "push and pull request.",
+            *(
+                [
+                    "approval, `.github/workflows/deploy.yml` builds the ARM64 zip, uploads it",
+                    "to the code bucket as `code/<sha256>.zip`, and runs `terraform plan` and",
+                    "`apply`. The job summary shows the MCP URL. `.github/workflows/ci.yml` runs",
+                    "the tests and builds the package on every push and pull request.",
+                ]
+                if code
+                else [
+                    "approval, `.github/workflows/deploy.yml` builds the ARM64 image, pushes it to",
+                    "ECR tagged with the commit, and runs `terraform plan` and `apply`. The job",
+                    "summary shows the MCP URL. `.github/workflows/ci.yml` runs the tests on every",
+                    "push and pull request.",
+                ]
+            ),
             "",
         ]
     if deployment.scripts:
@@ -503,7 +532,28 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
             "",
             *shell(["deploy/scripts/deploy.sh"], ["./deploy/scripts/deploy.ps1"]),
         ]
-    if not deployment.scripts and not ci:
+    if not deployment.scripts and not ci and code:
+        upload = 'aws s3 cp deploy/agentcore/build/agentcore-code.zip "s3://<code_bucket>/<key>"'
+        deploy_body += [
+            "Build the zip (the script prints its S3 key, `code/<sha256>.zip`), upload it",
+            "to the code bucket from the bootstrap outputs, then apply Terraform:",
+            "",
+            *shell(
+                [
+                    "python deploy/agentcore/package.py",
+                    upload,
+                    f"terraform -chdir={tf} init -backend-config=backend.hcl",
+                    f'terraform -chdir={tf} apply -var "code_key=<key>"',
+                ],
+                [
+                    "python deploy/agentcore/package.py",
+                    upload,
+                    f"terraform -chdir={tf} init -backend-config=backend.hcl",
+                    f'terraform -chdir={tf} apply -var "code_key=<key>"',
+                ],
+            ),
+        ]
+    elif not deployment.scripts and not ci:
         deploy_body += [
             "Build and push the image, then apply Terraform (bucket and repository from the",
             "bootstrap outputs):",
@@ -523,9 +573,17 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
                 ],
             ),
         ]
+    if code and (deployment.scripts or ci):
+        deploy_body += [
+            "To check the package without deploying, build it locally: it prints the S3",
+            "key and writes `deploy/agentcore/build/agentcore-code.zip`.",
+            "",
+            *shell(["python deploy/agentcore/package.py"], ["python deploy/agentcore/package.py"]),
+        ]
     deploy_body += [
-        "The runtime runs your image with `MCP_AUTH=platform`: AgentCore rejects requests",
-        "without a valid token before they reach the container.",
+        f"The runtime runs your {'code' if code else 'image'} with `MCP_AUTH=platform`: "
+        "AgentCore rejects requests",
+        f"without a valid token before they reach the {'server' if code else 'container'}.",
         "",
     ]
     sections.append(Section("Deploy", deploy_body))
@@ -593,11 +651,22 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
                 "- **Code or settings**: commit and push"
                 + (" (the workflow deploys)" if ci else "")
                 + (", or run the deploy script again" if deployment.scripts else "")
-                + ". Every deploy pushes a new, immutable image tag.",
-                f"- **Roll back** by applying an earlier tag: "
-                f'`terraform -chdir={tf} apply -var "image_tag=<earlier tag>"`.',
+                + (
+                    ". Every deploy uploads a zip named after its content, `code/<sha256>.zip`."
+                    if code
+                    else ". Every deploy pushes a new, immutable image tag."
+                ),
+                (
+                    "- **Roll back** by applying an earlier package (keys are listed with "
+                    "`aws s3 ls s3://<code_bucket>/code/`): "
+                    f'`terraform -chdir={tf} apply -var "code_key=<earlier key>"`.'
+                    if code
+                    else f"- **Roll back** by applying an earlier tag: "
+                    f'`terraform -chdir={tf} apply -var "image_tag=<earlier tag>"`.'
+                ),
                 "- **Python packages** are pinned with hashes in `requirements-aws.lock` (the",
-                "  image) and `requirements.lock` (local use). To refresh them:",
+                f"  {'package' if code else 'image'}) and `requirements.lock` (local use). "
+                "To refresh them:",
                 "",
                 *shell([LOCK_REFRESH, LOCK_REFRESH_AWS], [LOCK_REFRESH, LOCK_REFRESH_AWS]),
             ],
@@ -612,12 +681,14 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
                     shell(["deploy/scripts/destroy.sh"], ["./deploy/scripts/destroy.ps1"])
                     if deployment.scripts
                     else shell(
-                        [f'terraform -chdir={tf} destroy -var "image_tag=unused"'],
-                        [f'terraform -chdir={tf} destroy -var "image_tag=unused"'],
+                        [f"terraform -chdir={tf} destroy -var {unused}"],
+                        [f"terraform -chdir={tf} destroy -var {unused}"],
                     )
                 ),
                 "This removes the runtime and its role. The bootstrap stays: to remove it,",
-                "empty the state bucket and the ECR repository, then run",
+                "empty the state bucket and the "
+                + ("code bucket" if code else "ECR repository")
+                + ", then run",
                 f"`terraform -chdir={boot} destroy`.",
                 "",
             ],
@@ -633,11 +704,24 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
         f"lists in `{tf}/terraform.tfvars`. |",
         "| The runtime does not start | Read its logs in CloudWatch under "
         "`/aws/bedrock-agentcore/runtimes/`. `Cannot start:` lines name the setting to fix. |",
-        "| `exec format error` in the logs | The image is not ARM64: build with "
-        "`--platform linux/arm64`. |",
+        *(
+            _CODE_TROUBLE
+            if code
+            else [
+                "| `exec format error` in the logs | The image is not ARM64: build with "
+                "`--platform linux/arm64`. |",
+            ]
+        ),
         "| `terraform apply` fails right after the role is created | IAM changes take a few "
         "seconds to reach AgentCore; run apply again. |",
-        "| `ImageTagAlreadyExistsException` | ECR tags are immutable: deploy with a new tag. |",
+        *(
+            []
+            if code
+            else [
+                "| `ImageTagAlreadyExistsException` | ECR tags are immutable: deploy with a "
+                "new tag. |"
+            ]
+        ),
     ]
     if credentials:
         trouble.insert(
@@ -653,6 +737,18 @@ def agentcore_deploy_md(ctx: GenerateContext, caps: ServerCapabilities, *, name:
     ]
     return render(f"Deploy {title} to AWS Bedrock AgentCore", intro, sections)
 
+
+_CODE_TROUBLE = [
+    "| `Your artifact contains binary files that are incompatible with Linux ARM64` | "
+    "Build the zip with `deploy/agentcore/package.py` (uv, `aarch64-manylinux2014` wheels), "
+    "not with a plain `pip install`. |",
+    "| `The specified entrypoint could not be found` | `main.py` must be at the zip root; "
+    "rebuild with the package script. |",
+    "| `package: ... over AgentCore's limits` | Zips are limited to 250 MB (750 MB "
+    "unzipped): drop unused dependencies from `requirements.txt` and refresh the locks. |",
+    "| `AccessDenied` on `s3:GetObject` during apply | The deploying role must be able to "
+    "read the package; the bootstrap deploy role can. |",
+]
 
 # requirements.txt plus boto3, read from stdin ("-"): works the same in bash and PowerShell.
 LOCK_REFRESH_AWS = (

@@ -20,7 +20,11 @@ import re
 
 from mcp_wizard_generators.codegen import one_line
 from mcp_wizard_generators.models import FileEntry, GenerateContext, ServerCapabilities
-from mcp_wizard_generators.plugins.deploy.constants import AWS_PROVIDER_VERSION, TERRAFORM_VERSION
+from mcp_wizard_generators.plugins.deploy.constants import (
+    AGENTCORE_CODE_RUNTIME,
+    AWS_PROVIDER_VERSION,
+    TERRAFORM_VERSION,
+)
 
 TF_DIR = "deploy/terraform"
 BOOTSTRAP_DIR = f"{TF_DIR}/bootstrap"
@@ -109,11 +113,7 @@ variable "name" {
   }
 }
 
-variable "image_tag" {
-  description = "Image tag in the ECR repository to run. The deploy script and workflow pass a new tag on every deploy."
-  type        = string
-}
-
+__ARTIFACT_VARIABLE__
 variable "api_base_url" {
   description = "Base URL of the upstream API the MCP tools call."
   type        = string
@@ -164,11 +164,7 @@ _MAIN_HEAD = """\
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
-# Created by bootstrap/, so an image can be pushed before the runtime exists.
-data "aws_ecr_repository" "server" {
-  name = var.name
-}
-
+__ARTIFACT_SOURCE__
 locals {
   account_id   = data.aws_caller_identity.current.account_id
   partition    = data.aws_partition.current.partition
@@ -212,7 +208,7 @@ output "api_secret_arn" {
 
 _ROLE = """\
 # Execution role the runtime assumes (AgentCore developer guide, "AgentCore Runtime
-# execution role"), narrowed to this repository, log groups and secret.
+# execution role"), narrowed to this __ARTIFACT_NOUN__, log groups and secret.
 data "aws_iam_policy_document" "assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -242,19 +238,7 @@ resource "aws_iam_role" "runtime" {
 }
 
 data "aws_iam_policy_document" "runtime" {
-  statement {
-    sid       = "ECRImageAccess"
-    actions   = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
-    resources = [data.aws_ecr_repository.server.arn]
-  }
-
-  statement {
-    sid       = "ECRTokenAccess"
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]
-  }
-
-  statement {
+__ARTIFACT_ACCESS__  statement {
     sid       = "Logs"
     actions   = ["logs:DescribeLogStreams", "logs:CreateLogGroup"]
     resources = ["${local.log_groups}/*"]
@@ -337,12 +321,7 @@ resource "aws_bedrockagentcore_agent_runtime" "server" {
   description        = __DESCRIPTION__
   role_arn           = aws_iam_role.runtime.arn
 
-  agent_runtime_artifact {
-    container_configuration {
-      container_uri = "${data.aws_ecr_repository.server.repository_url}:${var.image_tag}"
-    }
-  }
-
+__ARTIFACT__
   network_configuration {
     network_mode = "PUBLIC"
   }
@@ -351,7 +330,7 @@ resource "aws_bedrockagentcore_agent_runtime" "server" {
     server_protocol = "MCP"
   }
 
-  # AgentCore checks the bearer token before a request reaches the container,
+  # AgentCore checks the bearer token before a request reaches the __WORKLOAD__,
   # so the server runs with MCP_AUTH=platform. Any OIDC provider works.
   authorizer_configuration {
     custom_jwt_authorizer {
@@ -465,7 +444,7 @@ jwt_allowed_scopes    = __SCOPES__
 _BOOTSTRAP = """\
 # One-time setup, run with administrator credentials (DEPLOY.md, step "Bootstrap").
 # Creates what the deploy role needs but must not create itself: the Terraform state
-# bucket, the ECR repository, the GitHub OIDC provider and the deploy role.
+# bucket, the __STORE_NOUN__, the GitHub OIDC provider and the deploy role.
 terraform {
   required_version = ">= __TF_MIN__"
 
@@ -561,38 +540,7 @@ resource "aws_s3_bucket_policy" "state" {
   policy = data.aws_iam_policy_document.state.json
 }
 
-# ---- Container registry ----------------------------------------------------------
-
-resource "aws_ecr_repository" "server" {
-  name                 = var.name
-  image_tag_mutability = "IMMUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  encryption_configuration {
-    encryption_type = "AES256"
-  }
-}
-
-resource "aws_ecr_lifecycle_policy" "server" {
-  repository = aws_ecr_repository.server.name
-  policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep the 30 most recent images"
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 30
-      }
-      action = { type = "expire" }
-    }]
-  })
-}
-
-# ---- GitHub Actions deploy role (OIDC: no long-lived keys) ------------------------
+__ARTIFACT_STORE__# ---- GitHub Actions deploy role (OIDC: no long-lived keys) ------------------------
 
 resource "aws_iam_openid_connect_provider" "github" {
   count          = local.create_oidc ? 1 : 0
@@ -650,30 +598,7 @@ data "aws_iam_policy_document" "deploy" {
     resources = ["${aws_s3_bucket.state.arn}/*"]
   }
 
-  statement {
-    sid       = "EcrLogin"
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid = "EcrPush"
-    actions = [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:BatchGetImage",
-      "ecr:CompleteLayerUpload",
-      "ecr:DescribeImages",
-      "ecr:DescribeRepositories",
-      "ecr:GetDownloadUrlForLayer",
-      "ecr:InitiateLayerUpload",
-      "ecr:ListTagsForResource",
-      "ecr:PutImage",
-      "ecr:UploadLayerPart",
-    ]
-    resources = [aws_ecr_repository.server.arn]
-  }
-
-  statement {
+__ARTIFACT_DEPLOY__  statement {
     sid = "RuntimeRole"
     actions = [
       "iam:CreateRole",
@@ -796,12 +721,7 @@ output "state_bucket" {
   value       = aws_s3_bucket.state.bucket
 }
 
-output "ecr_repository_url" {
-  description = "Where images are pushed."
-  value       = aws_ecr_repository.server.repository_url
-}
-
-output "deploy_role_arn" {
+__ARTIFACT_OUTPUT__output "deploy_role_arn" {
   description = "Role the GitHub workflow assumes (GitHub variable AWS_DEPLOY_ROLE_ARN)."
   value       = local.github ? aws_iam_role.deploy[0].arn : null
 }
@@ -818,12 +738,276 @@ create_github_oidc_provider = true
 """
 
 
+# ---- What the runtime runs: an ECR image (container) or an S3 zip (code) ------------
+
+_CONTAINER = {
+    "ARTIFACT_NOUN": "repository",
+    "WORKLOAD": "container",
+    "STORE_NOUN": "ECR repository",
+    "ARTIFACT_VARIABLE": """\
+variable "image_tag" {
+  description = "Image tag in the ECR repository to run. The deploy script and workflow pass a new tag on every deploy."
+  type        = string
+}
+""",
+    "ARTIFACT_SOURCE": """\
+# Created by bootstrap/, so an image can be pushed before the runtime exists.
+data "aws_ecr_repository" "server" {
+  name = var.name
+}
+""",
+    "ARTIFACT_ACCESS": """\
+  statement {
+    sid       = "ECRImageAccess"
+    actions   = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+    resources = [data.aws_ecr_repository.server.arn]
+  }
+
+  statement {
+    sid       = "ECRTokenAccess"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+""",
+    "ARTIFACT": """\
+  agent_runtime_artifact {
+    container_configuration {
+      container_uri = "${data.aws_ecr_repository.server.repository_url}:${var.image_tag}"
+    }
+  }
+""",
+    "ARTIFACT_STORE": """\
+# ---- Container registry ----------------------------------------------------------
+
+resource "aws_ecr_repository" "server" {
+  name                 = var.name
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "server" {
+  repository = aws_ecr_repository.server.name
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep the 30 most recent images"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 30
+      }
+      action = { type = "expire" }
+    }]
+  })
+}
+
+""",
+    "ARTIFACT_DEPLOY": """\
+  statement {
+    sid       = "EcrLogin"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "EcrPush"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchGetImage",
+      "ecr:CompleteLayerUpload",
+      "ecr:DescribeImages",
+      "ecr:DescribeRepositories",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:InitiateLayerUpload",
+      "ecr:ListTagsForResource",
+      "ecr:PutImage",
+      "ecr:UploadLayerPart",
+    ]
+    resources = [aws_ecr_repository.server.arn]
+  }
+
+""",
+    "ARTIFACT_OUTPUT": """\
+output "ecr_repository_url" {
+  description = "Where images are pushed."
+  value       = aws_ecr_repository.server.repository_url
+}
+
+""",
+}
+
+_CODE = {
+    "ARTIFACT_NOUN": "code bucket",
+    "WORKLOAD": "code",
+    "STORE_NOUN": "code bucket",
+    "ARTIFACT_VARIABLE": """\
+variable "code_key" {
+  description = "S3 key of the zip in the code bucket (code/<sha256>.zip). The deploy script and workflow pass the key of the package they upload."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9!_.*'()/-]+[.]zip$", var.code_key))
+    error_message = "code_key must be an S3 key ending in .zip, such as code/<sha256>.zip."
+  }
+}
+""",
+    "ARTIFACT_SOURCE": """\
+# Created by bootstrap/, so a package can be uploaded before the runtime exists.
+data "aws_s3_bucket" "code" {
+  bucket = "${var.name}-code-${data.aws_caller_identity.current.account_id}"
+}
+""",
+    "ARTIFACT_ACCESS": """\
+  statement {
+    sid       = "CodePackage"
+    actions   = ["s3:GetObject"]
+    resources = ["${data.aws_s3_bucket.code.arn}/*"]
+  }
+
+""",
+    "ARTIFACT": """\
+  # Direct code deployment: the zip from deploy/agentcore/package.py, run with the
+  # AgentCore managed Python runtime on ARM64.
+  agent_runtime_artifact {
+    code_configuration {
+      entry_point = ["main.py"]
+      runtime     = "__RUNTIME__"
+
+      code {
+        s3 {
+          bucket = data.aws_s3_bucket.code.bucket
+          prefix = var.code_key
+        }
+      }
+    }
+  }
+""",
+    "ARTIFACT_STORE": """\
+# ---- Code packages ---------------------------------------------------------------
+
+# Zips from deploy/agentcore/package.py, one object per content hash (code/<sha256>.zip),
+# so a rollback is applying an earlier key.
+resource "aws_s3_bucket" "code" {
+  bucket = "${var.name}-code-${local.account_id}"
+}
+
+resource "aws_s3_bucket_versioning" "code" {
+  bucket = aws_s3_bucket.code.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "code" {
+  bucket = aws_s3_bucket.code.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "code" {
+  bucket                  = aws_s3_bucket.code.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "code" {
+  bucket = aws_s3_bucket.code.id
+
+  rule {
+    id     = "expire-replaced-versions"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+}
+
+data "aws_iam_policy_document" "code" {
+  statement {
+    sid       = "DenyInsecureTransport"
+    effect    = "Deny"
+    actions   = ["s3:*"]
+    resources = [aws_s3_bucket.code.arn, "${aws_s3_bucket.code.arn}/*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "code" {
+  bucket = aws_s3_bucket.code.id
+  policy = data.aws_iam_policy_document.code.json
+}
+
+""",
+    "ARTIFACT_DEPLOY": """\
+  statement {
+    sid       = "CodeBucket"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.code.arn]
+  }
+
+  # Upload packages; AgentCore also checks that the caller can read the package.
+  statement {
+    sid       = "CodePackages"
+    actions   = ["s3:PutObject", "s3:GetObject"]
+    resources = ["${aws_s3_bucket.code.arn}/*"]
+  }
+
+""",
+    "ARTIFACT_OUTPUT": """\
+output "code_bucket" {
+  description = "S3 bucket for code packages (GitHub variable CODE_BUCKET)."
+  value       = aws_s3_bucket.code.bucket
+}
+
+""",
+}
+
+
 def resource_name(caps: ServerCapabilities) -> str:
     """Terraform/ECR base name: the distribution name, which is lowercase with hyphens."""
     return caps.package_name.replace("_", "-")[:47]
 
 
-def terraform_files(ctx: GenerateContext, caps: ServerCapabilities) -> list[FileEntry]:
+def _artifact(code: bool) -> dict[str, str]:
+    if not code:
+        return _CONTAINER
+    return {**_CODE, "ARTIFACT": _CODE["ARTIFACT"].replace("__RUNTIME__", AGENTCORE_CODE_RUNTIME)}
+
+
+def terraform_files(
+    ctx: GenerateContext, caps: ServerCapabilities, *, code: bool = False
+) -> list[FileEntry]:
+    """Both modules. ``code``: the runtime runs a zip from S3 (agentcore-code) instead
+    of an ECR image (agentcore-container)."""
+    art = _artifact(code)
     deployment = ctx.deployment
     auth = deployment.inbound_auth
     name = resource_name(caps)
@@ -849,14 +1033,26 @@ def terraform_files(ctx: GenerateContext, caps: ServerCapabilities) -> list[File
             "    API_SECRETS_ARN = data.aws_secretsmanager_secret.api.arn",
         ]
     main = (
-        _fill(_MAIN_HEAD, DISCOVERY=discovery, CLIENTS=clients)
+        _fill(
+            _MAIN_HEAD,
+            DISCOVERY=discovery,
+            CLIENTS=clients,
+            ARTIFACT_SOURCE=art["ARTIFACT_SOURCE"],
+        )
         + "\n"
         + (_SECRET if secret else "")
-        + _fill(_ROLE, SECRET_STATEMENT=_SECRET_STATEMENT if secret else "")
+        + _fill(
+            _ROLE,
+            SECRET_STATEMENT=_SECRET_STATEMENT if secret else "",
+            ARTIFACT_NOUN=art["ARTIFACT_NOUN"],
+            ARTIFACT_ACCESS=art["ARTIFACT_ACCESS"],
+        )
         + _fill(
             _RUNTIME,
             DESCRIPTION=_hcl(f"MCP server for {one_line(ctx.ir.title)[:200]}"),
             ENV="\n".join(env) + "\n",
+            ARTIFACT=art["ARTIFACT"],
+            WORKLOAD=art["WORKLOAD"],
         )
     )
     outputs = _OUTPUTS
@@ -882,19 +1078,30 @@ def terraform_files(ctx: GenerateContext, caps: ServerCapabilities) -> list[File
             _fill(_BACKEND_EXAMPLE, NAME=name, REGION=deployment.aws_region),
         ),
         FileEntry(f"{TF_DIR}/.gitignore", _GITIGNORE),
-        FileEntry(f"{TF_DIR}/variables.tf", _VARIABLES),
+        FileEntry(
+            f"{TF_DIR}/variables.tf",
+            _fill(_VARIABLES, ARTIFACT_VARIABLE=art["ARTIFACT_VARIABLE"]),
+        ),
         FileEntry(f"{TF_DIR}/main.tf", main),
         FileEntry(f"{TF_DIR}/outputs.tf", outputs),
         FileEntry(f"{TF_DIR}/terraform.tfvars", tfvars),
         FileEntry(
             f"{BOOTSTRAP_DIR}/main.tf",
-            _fill(_BOOTSTRAP, DEPLOY_EXTRA=extra, **versions)
+            _fill(
+                _BOOTSTRAP,
+                DEPLOY_EXTRA=extra,
+                STORE_NOUN=art["STORE_NOUN"],
+                ARTIFACT_STORE=art["ARTIFACT_STORE"],
+                ARTIFACT_DEPLOY=art["ARTIFACT_DEPLOY"],
+                **versions,
+            )
             + (_BOOTSTRAP_SECRET if secret else ""),
         ),
         FileEntry(f"{BOOTSTRAP_DIR}/variables.tf", _BOOTSTRAP_VARIABLES),
         FileEntry(
             f"{BOOTSTRAP_DIR}/outputs.tf",
-            _BOOTSTRAP_OUTPUTS + (_BOOTSTRAP_SECRET_OUTPUT if secret else ""),
+            _fill(_BOOTSTRAP_OUTPUTS, ARTIFACT_OUTPUT=art["ARTIFACT_OUTPUT"])
+            + (_BOOTSTRAP_SECRET_OUTPUT if secret else ""),
         ),
         FileEntry(
             f"{BOOTSTRAP_DIR}/terraform.tfvars",
