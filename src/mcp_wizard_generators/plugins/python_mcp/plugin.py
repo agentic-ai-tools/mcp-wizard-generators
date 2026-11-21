@@ -31,6 +31,7 @@ from mcp_wizard_generators.models import (
 from mcp_wizard_generators.openapi import IN_KEY, WHOLE_BODY_KEY
 from mcp_wizard_generators.plugins.python_mcp import (
     auth_template,
+    aws_secrets_template,
     client_template,
     tests_template,
     transport_template,
@@ -59,6 +60,14 @@ def _jwt(ctx: GenerateContext) -> bool:
     return JWT_FEATURE in ctx.server_features
 
 
+# aws-secrets: upstream credentials come from AWS Secrets Manager (aws_secrets.py).
+AWS_SECRETS_FEATURE = "aws-secrets"
+
+
+def _aws(ctx: GenerateContext) -> bool:
+    return AWS_SECRETS_FEATURE in ctx.server_features
+
+
 _TYPING_NAMES = ("Any", "Annotated", "Literal", "Field", "JsonValue", "re")
 _RESERVED_MODULE_NAMES = frozenset(
     {
@@ -77,6 +86,8 @@ _RESERVED_MODULE_NAMES = frozenset(
         "load_jwt_settings",
         "AuthConfigError",
         "serve_with_jwt",
+        "load_api_secrets",
+        "SecretsError",
         *_TYPING_NAMES,
     }
 )
@@ -116,7 +127,7 @@ class PythonMcpPlugin:
     display_name = "Python MCP server"
     transports = frozenset({"stdio", "streamable-http"})
     # jwt-auth: the server checks bearer tokens itself (auth.py); docker turns it on.
-    features = frozenset({JWT_FEATURE})
+    features = frozenset({JWT_FEATURE, AWS_SECRETS_FEATURE})
 
     def generate(self, ctx: GenerateContext) -> tuple[FileTree, ServerCapabilities]:
         return self._tree(ctx), self._capabilities(ctx)
@@ -128,7 +139,12 @@ class PythonMcpPlugin:
             package_name=ctx.package_name,
             entrypoint=f"{ctx.package_name}.server:main",
             transports=self.transports,
-            lock_files=("requirements.lock",),
+            # The first lock is the one a deployment installs from.
+            lock_files=(
+                ("requirements-aws.lock", "requirements.lock")
+                if _aws(ctx)
+                else ("requirements.lock",)
+            ),
             env_vars=self._env_vars(ctx),
             features=ctx.server_features & self.features,
         )
@@ -161,6 +177,10 @@ class PythonMcpPlugin:
             EnvVar("MCP_AUTH", "none, or platform when a gateway authenticates callers"),
             EnvVar("MCP_ALLOWED_HOSTS", "Comma-separated Host values (DNS-rebinding protection)"),
         ]
+        if _aws(ctx):
+            found.append(
+                EnvVar("API_SECRETS_ARN", "Secrets Manager secret (JSON) with the credentials")
+            )
         if _jwt(ctx):
             found += [
                 EnvVar("MCP_JWT_DISCOVERY_URL", "Identity provider OIDC discovery URL"),
@@ -193,6 +213,17 @@ class PythonMcpPlugin:
         ]
         if _jwt(ctx):
             entries.append(FileEntry(f"src/{pkg}/auth.py", auth_template.AUTH_MODULE))
+        if _aws(ctx):
+            credentials = tuple(v.name for v in self._env_vars(ctx) if v.secret)
+            entries += [
+                FileEntry(
+                    f"src/{pkg}/aws_secrets.py",
+                    aws_secrets_template.AWS_SECRETS_MODULE.replace(
+                        "__CREDENTIALS__", repr(credentials)
+                    ),
+                ),
+                FileEntry("requirements-aws.lock", self._lock("requirements-aws.txt")),
+            ]
         notes = self._security_notes(ctx)
         if notes:
             entries.append(FileEntry("SECURITY-NOTES.md", notes))
@@ -241,6 +272,10 @@ class PythonMcpPlugin:
                 '        ({"MCP_AUTH": "jwt"}, "not built into this server"),\n', ""
             )
             files["tests/test_jwt_auth.py"] = auth_template.TEST_JWT_AUTH.replace(
+                "__PKG__", ctx.package_name
+            )
+        if _aws(ctx):
+            files["tests/test_aws_secrets.py"] = aws_secrets_template.TEST_AWS_SECRETS.replace(
                 "__PKG__", ctx.package_name
             )
         return files
@@ -402,6 +437,7 @@ class PythonMcpPlugin:
                 f"(`{one_line(base)}`). Override with `API_BASE_URL`.",
                 "",
                 *self._readme_http(pkg, jwt=_jwt(ctx)),
+                *(self._readme_aws() if _aws(ctx) else []),
                 *self._readme_auth(ctx),
                 *self._readme_security(ctx),
                 "## Errors and limits",
@@ -478,6 +514,19 @@ class PythonMcpPlugin:
                 "",
             ]
         )
+
+    @staticmethod
+    def _readme_aws() -> list[str]:
+        return [
+            "## Credentials from AWS Secrets Manager",
+            "",
+            "When `API_SECRETS_ARN` is set, the server reads that secret at startup with its",
+            "IAM role and fills in any credential variables that are not already set. The",
+            'secret holds a JSON object, for example `{"API_KEY": "..."}`; values are never',
+            "logged. This needs boto3: install from `requirements-aws.lock` instead of",
+            "`requirements.lock`.",
+            "",
+        ]
 
     @staticmethod
     def _readme_http(pkg: str, *, jwt: bool = False) -> list[str]:
@@ -559,6 +608,8 @@ class PythonMcpPlugin:
         deps = "".join(f"\n              {json.dumps(r)}," for r in _direct_requirements())
         # auth.py imports PyJWT; requirements.lock already pins it (an mcp dependency).
         jwt_extra = '\n            jwt = ["PyJWT[crypto]>=2.10,<3"]' if _jwt(ctx) else ""
+        if _aws(ctx):
+            jwt_extra += '\n            aws = ["boto3>=1.35,<2"]'
         return dedent(
             f"""\
             [build-system]
@@ -592,17 +643,22 @@ class PythonMcpPlugin:
     def _requirements(self) -> str:
         return "\n".join(_direct_requirements()) + "\n"
 
-    def _lock(self) -> str:
-        """The packaged hash lock, with a header for this project instead of the repo's."""
-        lines = _lock_file("requirements.txt").splitlines()
+    def _lock(self, packaged: str = "requirements.txt") -> str:
+        """A packaged hash lock, with a header for this project instead of the repo's."""
+        name = (
+            "requirements-aws.lock" if packaged == "requirements-aws.txt" else "requirements.lock"
+        )
+        lines = _lock_file(packaged).splitlines()
         while lines and lines[0].startswith("#"):
             lines.pop(0)  # uv's header names a command that only exists in this repo
         header = [
             "# Hash-pinned dependencies, prepared by mcp-wizard-generators:",
             "# every package for every OS and CPython 3.11+, with sha256 hashes. Install with",
-            "#   pip install --require-hashes -r requirements.lock",
+            f"#   pip install --require-hashes -r {name}",
             "#   pip install --no-deps -e .",
         ]
+        if name == "requirements-aws.lock":
+            header.insert(1, "# Includes boto3, to read credentials from AWS Secrets Manager.")
         return "\n".join(header) + "\n\n" + "\n".join(lines) + "\n"
 
     def _env_example(self, ctx: GenerateContext) -> str:
@@ -654,6 +710,11 @@ class PythonMcpPlugin:
                 "# MCP_JWT_AUDIENCES=",
                 "# MCP_JWT_CLIENTS=",
                 "# MCP_JWT_SCOPES=",
+            ]
+        if _aws(ctx):
+            lines += [
+                "# Read the credentials above from a Secrets Manager secret (JSON object):",
+                "# API_SECRETS_ARN=arn:aws:secretsmanager:<region>:<account>:secret:<name>",
             ]
         return "\n".join(lines) + "\n"
 
@@ -1203,7 +1264,29 @@ class PythonMcpPlugin:
         title_literal = py_str(ctx.ir.title)
         imports = self._server_imports(tool_fns)
         source = self._server_source(pkg, tool_fns, title_literal, imports)
-        return self._with_jwt(source, pkg) if _jwt(ctx) else source
+        if _jwt(ctx):
+            source = self._with_jwt(source, pkg)
+        return self._with_aws(source, pkg) if _aws(ctx) else source
+
+    @staticmethod
+    def _with_aws(source: str, pkg: str) -> str:
+        """server.py that loads credentials from Secrets Manager before checking config."""
+        pairs = [
+            (
+                f"from {pkg}.client import ConfigError, check_config, request\n",
+                f"from {pkg}.aws_secrets import SecretsError, load_api_secrets\n"
+                f"from {pkg}.client import ConfigError, check_config, request\n",
+            ),
+            (
+                "    try:\n        check_config()\n",
+                "    try:\n        load_api_secrets()\n        check_config()\n",
+            ),
+            ("    except (ConfigError, ", "    except (SecretsError, ConfigError, "),
+        ]
+        for old, new in pairs:
+            assert source.count(old) == 1, old
+            source = source.replace(old, new)
+        return source
 
     @staticmethod
     def _with_jwt(source: str, pkg: str) -> str:

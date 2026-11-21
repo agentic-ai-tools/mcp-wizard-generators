@@ -1,11 +1,17 @@
-"""Compile the hash lock shipped in every generated python-mcp project (ADR-023).
+"""Compile the hash locks shipped in generated python-mcp projects (ADR-023, ADR-026).
 
-    python scripts/lock_python_mcp.py            # refresh after editing requirements.in
+    python scripts/lock_python_mcp.py            # refresh after editing a requirements*.in
     python scripts/lock_python_mcp.py --upgrade  # move every pin to the newest allowed
-    python scripts/lock_python_mcp.py --check    # CI: fail if the lock is out of date
+    python scripts/lock_python_mcp.py --check    # CI: fail if a lock is out of date
 
-The worker that builds zips has no network, so the lock is prepared here and
-packaged. It is universal (every OS, CPython >= 3.11) and pins sha256 hashes.
+The worker that builds zips has no network, so the locks are prepared here and
+packaged. They are universal (every OS, CPython >= 3.11) and pin sha256 hashes.
+
+- requirements.txt      every project (requirements.in)
+- requirements-aws.txt  servers that read credentials from AWS Secrets Manager
+                        (AgentCore deployments): requirements.in plus boto3,
+                        constrained to the base lock so shared pins stay identical
+
 Needs `uv` (installed with the dev extras) and network access.
 """
 
@@ -22,17 +28,21 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCK_DIR = ROOT / "src" / "mcp_wizard_generators" / "plugins" / "python_mcp" / "lock"
 SOURCE = LOCK_DIR / "requirements.in"
 LOCK = LOCK_DIR / "requirements.txt"
+AWS_SOURCE = LOCK_DIR / "requirements-aws.in"
+AWS_LOCK = LOCK_DIR / "requirements-aws.txt"
+# Order matters: the AWS lock is constrained by the base lock.
+LOCKS = ((SOURCE, LOCK), (AWS_SOURCE, AWS_LOCK))
 SELF = "python scripts/lock_python_mcp.py"
 
 
-def compile_command(output: Path, *, upgrade: bool = False) -> list[str]:
+def compile_command(output: Path, *, upgrade: bool = False, source: Path = SOURCE) -> list[str]:
     uv = shutil.which("uv")
     base = [uv] if uv else [sys.executable, "-m", "uv"]
     cmd = [
         *base,
         "pip",
         "compile",
-        SOURCE.name,
+        source.name,
         "--universal",
         "--generate-hashes",
         "--python-version",
@@ -46,32 +56,40 @@ def compile_command(output: Path, *, upgrade: bool = False) -> list[str]:
     return [*cmd, "--upgrade"] if upgrade else cmd
 
 
+def _up_to_date(source: Path, lock: Path) -> bool:
+    # Re-resolve with the current pins as preferences; any change means drift.
+    with tempfile.TemporaryDirectory() as tmp:
+        candidate = Path(tmp) / lock.name
+        shutil.copyfile(lock, candidate)
+        subprocess.run(compile_command(candidate, source=source), cwd=LOCK_DIR, check=True)
+        current = lock.read_text(encoding="utf-8").replace("\r\n", "\n")
+        fresh = candidate.read_text(encoding="utf-8").replace("\r\n", "\n")
+    if current != fresh:
+        print(
+            f"{lock.relative_to(ROOT)} is out of date with {source.name}; run: {SELF}",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--check", action="store_true", help="fail if the lock would change")
+    mode.add_argument("--check", action="store_true", help="fail if a lock would change")
     mode.add_argument("--upgrade", action="store_true", help="move pins to the newest allowed")
     args = parser.parse_args(argv)
 
     if not args.check:
-        subprocess.run(compile_command(LOCK, upgrade=args.upgrade), cwd=LOCK_DIR, check=True)
-        print(f"wrote {LOCK.relative_to(ROOT)}")
+        for source, lock in LOCKS:
+            cmd = compile_command(lock, upgrade=args.upgrade, source=source)
+            subprocess.run(cmd, cwd=LOCK_DIR, check=True)
+            print(f"wrote {lock.relative_to(ROOT)}")
         return 0
 
-    # Re-resolve with the current pins as preferences; any change means drift.
-    with tempfile.TemporaryDirectory() as tmp:
-        candidate = Path(tmp) / "requirements.txt"
-        shutil.copyfile(LOCK, candidate)
-        subprocess.run(compile_command(candidate), cwd=LOCK_DIR, check=True)
-        current = LOCK.read_text(encoding="utf-8").replace("\r\n", "\n")
-        fresh = candidate.read_text(encoding="utf-8").replace("\r\n", "\n")
-    if current != fresh:
-        print(
-            f"{LOCK.relative_to(ROOT)} is out of date with {SOURCE.name}; run: {SELF}",
-            file=sys.stderr,
-        )
+    if not all([_up_to_date(source, lock) for source, lock in LOCKS]):
         return 1
-    print("python-mcp lock is up to date")
+    print("python-mcp locks are up to date")
     return 0
 
 

@@ -114,7 +114,15 @@ def test_lock_script_builds_the_documented_command() -> None:
     assert module.compile_command(Path("o"), upgrade=True)[-1] == "--upgrade"
 
 
-@pytest.mark.parametrize("path", ["lock/requirements.in", "lock/requirements.txt"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "lock/requirements.in",
+        "lock/requirements.txt",
+        "lock/requirements-aws.in",
+        "lock/requirements-aws.txt",
+    ],
+)
 def test_lock_files_are_package_data(path: str) -> None:
     from importlib.resources import files
 

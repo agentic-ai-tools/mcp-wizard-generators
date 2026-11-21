@@ -1,0 +1,8 @@
+# Servers that read upstream API credentials from AWS Secrets Manager
+# (AgentCore deployments, design ADR-026). requirements-aws.txt next to this file
+# is the hash lock compiled from it:
+#   python scripts/lock_python_mcp.py
+# It is a superset of requirements.txt; the constraint keeps shared pins identical.
+-r requirements.in
+-c requirements.txt
+boto3>=1.35,<2
