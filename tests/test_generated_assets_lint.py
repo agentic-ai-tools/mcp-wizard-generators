@@ -56,10 +56,11 @@ CASES = {
         DeploymentConfig(target="agentcore-code", inbound_auth=COGNITO, **AWS, **FULL),
         NO_AUTH,
     ),
-    # Without CI or scripts: Terraform and DEPLOY.md stand alone.
+    # Without CI or scripts, and with no upstream credentials: no secret and no extra
+    # deploy-role statements (the only JWT case without them).
     "agentcore-code-minimal": (
         DeploymentConfig(target="agentcore-code", inbound_auth=JWT, **AWS),
-        API_KEY,
+        NO_AUTH,
     ),
 }
 

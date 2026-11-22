@@ -66,7 +66,7 @@ src/mcp_wizard_generators/
   cli.py                 # mcp-wizard-gen / python -m mcp_wizard_generators
   packaging/             # zip helper for Artifact Service
   plugins/python_mcp/    # python-mcp server architecture
-  plugins/deploy/        # Deployment targets layered on a server tree (local, docker)
+  plugins/deploy/        # Deployment targets layered on a server tree (local, docker, agentcore-*)
   rules/                 # Cursor + Anthropic hooks; originals copied into the artifact
 tests/
   fixtures/              # tiny pets OpenAPI + IR
@@ -124,6 +124,37 @@ aren't slugs and unknown HTTP methods. `tests/test_generated_code_hardening.py` 
   - Errors say what to check, and credentials in them are replaced with `***`.
   - mcp 2.x only.
 - **Dependencies and tests:** every zip includes a hash-pinned `requirements.lock`, upper bounds on its dependencies, and a `tests/` folder (tool regression, auth failures, HTTP status handling, redaction) that runs without network.
+
+**Deployment targets (0.6.0, ADR-026):** pass `deployment=DeploymentConfig(...)` to choose
+where the server runs: `local` (the default), `docker`, `agentcore-container` or
+`agentcore-code`. Without `deployment`, the output is the same as in 0.5.0.
+- **Transport:** every server can also serve streamable HTTP.
+- **Inbound auth:** `InboundAuthConfig(mode="jwt", ...)` takes any OIDC identity provider
+  (discovery URL, plus audiences, clients or scopes). AgentCore targets can create a
+  Cognito pool instead.
+- **Deploy assets:** Terraform (AgentCore), GitHub Actions, paired `.sh` / `.ps1` scripts
+  and a step-by-step `DEPLOY.md`.
+- **Validation:** CI runs actionlint, shellcheck, hadolint and `terraform validate` on the
+  output for every target. It also builds and calls the docker image, and runs the
+  `agentcore-code` zip in an ARM64 container.
+- **Not yet tested:** a deploy to a real AWS account.
+- **Removed:** `target="agentcore"` (the old placeholder plugin).
+
+```python
+from mcp_wizard_generators import DeploymentConfig, InboundAuthConfig
+
+deployment = DeploymentConfig(
+    target="docker",
+    ci="github-actions",
+    scripts=True,
+    inbound_auth=InboundAuthConfig(
+        mode="jwt",
+        discovery_url="https://login.example.com/.well-known/openid-configuration",
+        allowed_audiences=("api://pets",),
+    ),
+)
+generate_python_mcp(spec, operations, out_dir, package_name="pets_mcp", deployment=deployment)
+```
 
 **`security` (ADR-017):** pass the session's saved `SecurityConfig` JSON as-is. Every mode is
 honored in the generated `client.py`; invalid or unsupported settings raise `ValueError`
@@ -363,7 +394,7 @@ Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run
 | Default `main` | `{base}rc{N}` release candidate | **TestPyPI only** |
 | `release/X.Y.Z` | final `X.Y.Z` only | **TestPyPI then PyPI** |
 
-- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.5.0`) for `.dev` / `rc` builds.
+- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.6.0`) for `.dev` / `rc` builds.
 - Feature `N` combines a crc32 band of the normalized branch name with `GITHUB_RUN_NUMBER` so re-publishes get a new developmental version.
 - `main` uses `N = GITHUB_RUN_NUMBER` → `{base}rc{N}`.
 - Final releases: cut a branch named **`release/X.Y.Z`**, with `pyproject.toml` and `src/mcp_wizard_generators/__init__.__version__` equal to that exact public version; quality must pass, then the workflow uploads to TestPyPI and PyPI.
