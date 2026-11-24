@@ -690,7 +690,13 @@ class PythonMcpPlugin:
             lines.append("# No authentication (development only)")
         lines.append("# Largest response body the server reads (bytes):")
         lines.append("# MAX_RESPONSE_BYTES=1048576")
-        lines.append("MCP_TRANSPORT=stdio")
+        if ctx.deployment.target == "docker":
+            # compose's env_file overrides the Dockerfile ENV; stdio would exit at once.
+            lines.append("# Unset: the Dockerfile sets the transport. stdio only outside Docker")
+            lines.append("# (README: Run with Docker):")
+            lines.append("# MCP_TRANSPORT=stdio")
+        else:
+            lines.append("MCP_TRANSPORT=stdio")
         lines += [
             "# Streamable HTTP instead of stdio (README: Run over HTTP):",
             "# MCP_TRANSPORT=streamable-http",

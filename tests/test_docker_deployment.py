@@ -503,3 +503,21 @@ def test_docker_image_builds_and_serves_over_http(tmp_path: Path) -> None:
         assert "without authentication" in refused.stderr
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+
+
+def _active(env_example: str) -> list[str]:
+    return [ln.strip() for ln in env_example.splitlines() if ln.strip() and not ln.startswith("#")]
+
+
+@pytest.mark.parametrize("name", ["plain", "secured"])
+def test_docker_env_example_keeps_the_image_transport(name: str, request) -> None:
+    # compose's env_file overrides the image ENV: an active stdio line made the
+    # container read EOF on stdin, exit 0 and restart forever.
+    files = request.getfixturevalue(name)
+    assert not any(ln.startswith("MCP_TRANSPORT=") for ln in _active(files[".env.example"]))
+    assert "MCP_TRANSPORT=stdio" in files["README.md"].split("## Run with Docker", 1)[1]
+
+
+def test_local_env_example_still_defaults_to_stdio() -> None:
+    files = _files(DeploymentConfig(target="local"))
+    assert "MCP_TRANSPORT=stdio" in _active(files[".env.example"])

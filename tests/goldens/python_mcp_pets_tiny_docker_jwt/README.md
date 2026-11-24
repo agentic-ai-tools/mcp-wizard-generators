@@ -180,3 +180,8 @@ signature against the provider's published keys, the issuer, expiry, and the
 Requests without a valid token get 401 (403 when the client or scopes are not
 allowed). Serve it over HTTPS (a reverse proxy or load balancer) before
 publishing the port beyond this machine.
+
+For an MCP client on this machine over stdio instead, run the server outside
+Docker (see *Run locally*) with `MCP_TRANSPORT=stdio python -m pets_tiny_mcp`. Do not
+set `MCP_TRANSPORT` in `.env`: compose passes it to the container, and a stdio
+container exits at once and restarts in a loop.
