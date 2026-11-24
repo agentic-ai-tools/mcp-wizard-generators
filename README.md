@@ -394,7 +394,7 @@ Push a SemVer git tag matching `pyproject.toml` (for example `v0.3.0`) to run
 | Default `main` | `{base}rc{N}` release candidate | **TestPyPI only** |
 | `release/X.Y.Z` | final `X.Y.Z` only | **TestPyPI then PyPI** |
 
-- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.6.0`) for `.dev` / `rc` builds.
+- `{base}` is the static `[project].version` in `pyproject.toml` (today `0.6.1`) for `.dev` / `rc` builds.
 - Feature `N` combines a crc32 band of the normalized branch name with `GITHUB_RUN_NUMBER` so re-publishes get a new developmental version.
 - `main` uses `N = GITHUB_RUN_NUMBER` → `{base}rc{N}`.
 - Final releases: cut a branch named **`release/X.Y.Z`**, with `pyproject.toml` and `src/mcp_wizard_generators/__init__.__version__` equal to that exact public version; quality must pass, then the workflow uploads to TestPyPI and PyPI.
