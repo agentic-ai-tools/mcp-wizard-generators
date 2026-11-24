@@ -232,6 +232,13 @@ def _readme(ctx: GenerateContext, caps: ServerCapabilities, jwt: bool) -> str:
         "   (`cp .env.example .env`). Compose reads `.env`; the image never contains it.",
         "2. Build and start: `docker compose up --build`",
     ]
+    stdio = [
+        "For an MCP client on this machine over stdio instead, run the server outside",
+        f"Docker (see *Run locally*) with `MCP_TRANSPORT=stdio python -m {pkg}`. Do not",
+        "set `MCP_TRANSPORT` in `.env`: compose passes it to the container, and a stdio",
+        "container exits at once and restarts in a loop.",
+        "",
+    ]
     if jwt:
         host = urlsplit(ctx.deployment.inbound_auth.discovery_url).hostname or ""
         lines += [
@@ -260,4 +267,4 @@ def _readme(ctx: GenerateContext, caps: ServerCapabilities, jwt: bool) -> str:
             "auth (any OIDC identity provider).",
             "",
         ]
-    return "\n".join(lines)
+    return "\n".join(lines + stdio)
